@@ -1,0 +1,31 @@
+# Large reverse-engineering inputs
+*.bin
+*.dmp
+*.dump
+
+# .NET build output
+**/bin/
+**/obj/
+artifacts/
+dist/
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
