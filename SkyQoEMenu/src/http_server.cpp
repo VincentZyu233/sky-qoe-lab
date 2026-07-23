@@ -87,6 +87,8 @@ void HandleClient(SOCKET client) {
     Respond(client, 200, "OK", BuildPlayerJson());
   } else if (path == "/v1/world") {
     Respond(client, 200, "OK", BuildWorldJson());
+  } else if (path == "/v1/outfits") {
+    Respond(client, 200, "OK", BuildOutfitCatalogJson());
   } else if (path == "/v1/schema") {
     Respond(client, 200, "OK", BuildSchemaJson());
   } else {

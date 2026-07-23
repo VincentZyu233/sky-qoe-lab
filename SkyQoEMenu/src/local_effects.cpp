@@ -1,6 +1,7 @@
 #include "local_effects.h"
 
 #include "game_state.h"
+#include "outfit_changer.h"
 
 #include <windows.h>
 
@@ -206,6 +207,7 @@ void HookedEmitterUpdate(void* emitter_barn, void* argument2, void* argument3, v
                          std::uint64_t argument7, std::uint64_t argument8) {
   g_original_update(emitter_barn, argument2, argument3, argument4, argument5, argument6,
                     argument7, argument8);
+  ProcessPendingOutfitChange();
   ProcessEffect(emitter_barn);
 }
 
@@ -264,6 +266,7 @@ bool InitializeLocalEffects() {
 
   g_state.loaded_count = CountLoadedDefinitions();
   g_state.hook_installed = true;
+  SetOutfitGameThreadReady(true);
   char status_text[128]{};
   std::snprintf(status_text, sizeof(status_text), "ready; %u/%zu local definitions loaded",
                 g_state.loaded_count, kEmitterDefinitionSlots.size());
@@ -274,6 +277,7 @@ bool InitializeLocalEffects() {
 void ShutdownLocalEffects() {
   g_shutting_down.store(true, std::memory_order_release);
   g_enabled.store(false, std::memory_order_release);
+  SetOutfitGameThreadReady(false);
   if (g_hook_created && g_update_target) {
     MH_DisableHook(g_update_target);
     MH_RemoveHook(g_update_target);

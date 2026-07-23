@@ -1,6 +1,7 @@
 #include "snapshot_json.h"
 
 #include "game_state.h"
+#include "outfit_changer.h"
 
 #include <cmath>
 #include <cstdio>
@@ -188,6 +189,38 @@ void AppendLocalEffects(std::string& output, const LocalEffectSnapshot& effects)
   output.push_back('}');
 }
 
+void AppendOutfitChanger(std::string& output, const OutfitChangerSnapshot& changer) {
+  output += "{\"supported\":";
+  output += changer.supported ? "true" : "false";
+  output += ",\"catalogReady\":";
+  output += changer.catalog_ready ? "true" : "false";
+  output += ",\"gameThreadReady\":";
+  output += changer.game_thread_ready ? "true" : "false";
+  output += ",\"pending\":";
+  output += changer.pending ? "true" : "false";
+  output += ",\"totalCount\":" + std::to_string(changer.total_count);
+  output += ",\"slotCounts\":[";
+  for (std::size_t slot = 0; slot < changer.slot_counts.size(); ++slot) {
+    if (slot != 0) {
+      output.push_back(',');
+    }
+    output += std::to_string(changer.slot_counts[slot]);
+  }
+  output += "],\"pendingSlot\":" + std::to_string(changer.pending_slot);
+  output += ",\"pendingName\":";
+  AppendJsonString(output, changer.pending_name);
+  output += ",\"lastSlot\":" + std::to_string(changer.last_slot);
+  output += ",\"lastName\":";
+  AppendJsonString(output, changer.last_name);
+  output += ",\"applied\":" + std::to_string(changer.applied);
+  output += ",\"failed\":" + std::to_string(changer.failed);
+  output += ",\"resourcePath\":";
+  AppendJsonString(output, changer.resource_path);
+  output += ",\"status\":";
+  AppendJsonString(output, changer.status);
+  output.push_back('}');
+}
+
 void AppendWorld(std::string& output, const GameSnapshot& snapshot) {
   const WorldSnapshot& world = snapshot.world;
   output += "{\"root\":";
@@ -281,12 +314,14 @@ std::string BuildSnapshotJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
   std::string output;
   output.reserve(64 * 1024);
-  output += "{\"version\":\"0.3.0\",\"build\":";
+  output += "{\"version\":\"0.4.0\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"player\":";
   AppendPlayer(output, snapshot);
   output += ",\"world\":";
   AppendWorld(output, snapshot);
+  output += ",\"outfitChanger\":";
+  AppendOutfitChanger(output, GetOutfitChangerSnapshot());
 
   // Preserve v0.2 top-level fields used by existing CE Bridge consumers.
   output += ",\"valid\":";
@@ -316,7 +351,7 @@ std::string BuildSnapshotJson() {
 
 std::string BuildPlayerJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"version\":\"0.3.0\",\"build\":";
+  std::string output = "{\"version\":\"0.4.0\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"player\":";
   AppendPlayer(output, snapshot);
@@ -326,7 +361,7 @@ std::string BuildPlayerJson() {
 
 std::string BuildWorldJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"version\":\"0.3.0\",\"build\":";
+  std::string output = "{\"version\":\"0.4.0\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"world\":";
   AppendWorld(output, snapshot);
@@ -334,18 +369,62 @@ std::string BuildWorldJson() {
   return output;
 }
 
+std::string BuildOutfitCatalogJson() {
+  constexpr std::array<const char*, 10> kTypes = {
+      "Body", "Wing", "Hair", "Mask", "Neck",
+      "Feet", "Horn", "Face", "Prop", "Hat",
+  };
+  const OutfitChangerSnapshot changer = GetOutfitChangerSnapshot();
+  const auto& catalog = GetOutfitCatalog();
+  std::string output;
+  output.reserve(384 * 1024);
+  output += "{\"version\":\"0.4.0\",\"state\":";
+  AppendOutfitChanger(output, changer);
+  output += ",\"slots\":[";
+  for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
+    if (slot != 0) {
+      output.push_back(',');
+    }
+    output += "{\"index\":" + std::to_string(slot) + ",\"type\":";
+    AppendJsonString(output, kTypes[slot]);
+    output += ",\"definitions\":[";
+    for (std::size_t index = 0; index < catalog[slot].size(); ++index) {
+      if (index != 0) {
+        output.push_back(',');
+      }
+      const OutfitDefinition& definition = catalog[slot][index];
+      output += "{\"index\":" + std::to_string(index) + ",\"id\":" +
+                std::to_string(definition.id) + ",\"name\":";
+      AppendJsonString(output, definition.name);
+      output += ",\"season\":";
+      AppendJsonString(output, definition.season);
+      output += ",\"inCloset\":";
+      output += definition.in_closet ? "true" : "false";
+      output += ",\"isDefault\":";
+      output += definition.is_default ? "true" : "false";
+      output.push_back('}');
+    }
+    output += "]}";
+  }
+  output += "]}";
+  return output;
+}
+
 std::string BuildHealthJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"ok\":true,\"version\":\"0.3.0\",\"buildSupported\":";
+  const OutfitChangerSnapshot changer = GetOutfitChangerSnapshot();
+  std::string output = "{\"ok\":true,\"version\":\"0.4.0\",\"buildSupported\":";
   output += snapshot.build.supported ? "true" : "false";
   output += ",\"stateValid\":";
   output += snapshot.valid ? "true" : "false";
+  output += ",\"outfitCatalogReady\":";
+  output += changer.catalog_ready ? "true" : "false";
   output += "}";
   return output;
 }
 
 std::string BuildSchemaJson() {
-  return R"({"version":"0.3.0","readOnly":true,"bind":"127.0.0.1:27891","endpoints":{"/health":"service and build readiness","/v1/state":"complete player, outfit, world and local-effect snapshot","/v1/player":"player transform and outfit slots","/v1/world":"room, level assets, nearby transforms, wax and local effects","/v1/schema":"this endpoint map"},"addressEncoding":"hexadecimal strings","units":{"position":"game world units","distance":"game world units","interval":"milliseconds"}})";
+  return R"({"version":"0.4.0","readOnly":true,"bind":"127.0.0.1:27891","endpoints":{"/health":"service and build readiness","/v1/state":"complete player, outfit, world, changer and local-effect snapshot","/v1/player":"player transform and outfit slots","/v1/world":"room, level assets, nearby transforms, wax and local effects","/v1/outfits":"all outfit definitions, IDs, seasons and closet flags","/v1/schema":"this endpoint map"},"addressEncoding":"hexadecimal strings","units":{"position":"game world units","distance":"game world units","interval":"milliseconds"}})";
 }
 
 }  // namespace skyqoe

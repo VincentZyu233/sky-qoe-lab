@@ -3,6 +3,7 @@
 #include "game_state.h"
 #include "http_server.h"
 #include "local_effects.h"
+#include "outfit_changer.h"
 
 #include <d3d11.h>
 #include <dwmapi.h>
@@ -459,6 +460,126 @@ void DrawOutfitTab(const GameSnapshot& snapshot) {
   }
 }
 
+void DrawOutfitChangerTab(const GameSnapshot& snapshot) {
+  constexpr std::array<const char*, 10> kSlotLabels = {
+      u8"服装", u8"斗篷", u8"发型", u8"面具", u8"颈饰",
+      u8"鞋子", u8"侧头饰", u8"脸饰", u8"背饰 / 道具", u8"帽子 / 顶饰",
+  };
+  static std::array<std::size_t, 10> selected{};
+  static std::array<std::string, 10> last_seen;
+  static std::string feedback;
+  static bool feedback_success = false;
+
+  const OutfitChangerSnapshot changer = GetOutfitChangerSnapshot();
+  const auto& catalog = GetOutfitCatalog();
+  ImGui::Text(u8"服饰定义 %u 项", changer.total_count);
+  ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetStyleColorVec4(ImGuiCol_TextDisabled));
+  ImGui::TextWrapped("%s", changer.resource_path.empty() ? "-" : changer.resource_path.c_str());
+  ImGui::PopStyleColor();
+  ImGui::TextWrapped("%s", changer.status.c_str());
+  if (changer.pending) {
+    ImGui::TextColored(ImVec4(0.95F, 0.72F, 0.28F, 1.0F), u8"等待应用：%s",
+                       changer.pending_name.c_str());
+  }
+
+  for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
+    const std::string& current = snapshot.slots[slot].resource_name;
+    if (current != last_seen[slot]) {
+      const auto found = std::find_if(catalog[slot].begin(), catalog[slot].end(),
+                                      [&](const OutfitDefinition& definition) {
+                                        return definition.name == current;
+                                      });
+      if (found != catalog[slot].end()) {
+        selected[slot] = static_cast<std::size_t>(found - catalog[slot].begin());
+      }
+      last_seen[slot] = current;
+    }
+  }
+
+  const auto queue_choice = [&](std::size_t slot, std::size_t choice) {
+    if (slot >= catalog.size() || catalog[slot].empty()) {
+      return;
+    }
+    choice %= catalog[slot].size();
+    std::string error;
+    feedback_success = QueueOutfitChange(static_cast<std::uint32_t>(slot),
+                                         catalog[slot][choice].name, error);
+    if (feedback_success) {
+      selected[slot] = choice;
+      feedback = std::string(kSlotLabels[slot]) + " -> " + catalog[slot][choice].name;
+    } else {
+      feedback = error;
+    }
+  };
+
+  const bool controls_ready = snapshot.valid && changer.catalog_ready &&
+                              changer.game_thread_ready && !changer.pending;
+  ImGui::BeginDisabled(!controls_ready);
+  if (ImGui::BeginTable("outfit-changer", 4,
+                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                            ImGuiTableFlags_SizingStretchProp)) {
+    ImGui::TableSetupColumn(u8"部位", ImGuiTableColumnFlags_WidthFixed, 112.0F);
+    ImGui::TableSetupColumn(u8"上一个", ImGuiTableColumnFlags_WidthFixed, 54.0F);
+    ImGui::TableSetupColumn(u8"服饰资源", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn(u8"下一个", ImGuiTableColumnFlags_WidthFixed, 54.0F);
+    ImGui::TableHeadersRow();
+    for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
+      ImGui::PushID(static_cast<int>(slot));
+      ImGui::TableNextRow(0, 36.0F);
+      ImGui::TableSetColumnIndex(0);
+      ImGui::AlignTextToFramePadding();
+      ImGui::Text("%s (%zu)", kSlotLabels[slot], catalog[slot].size());
+
+      ImGui::TableSetColumnIndex(1);
+      if (ImGui::ArrowButton("##previous", ImGuiDir_Left) && !catalog[slot].empty()) {
+        const std::size_t previous =
+            (selected[slot] + catalog[slot].size() - 1) % catalog[slot].size();
+        queue_choice(slot, previous);
+      }
+
+      ImGui::TableSetColumnIndex(2);
+      ImGui::SetNextItemWidth(-1.0F);
+      const char* preview = catalog[slot].empty()
+                                ? "-"
+                                : catalog[slot][selected[slot] % catalog[slot].size()].name.c_str();
+      if (ImGui::BeginCombo("##catalog", preview, ImGuiComboFlags_HeightLarge)) {
+        for (std::size_t index = 0; index < catalog[slot].size(); ++index) {
+          const bool is_selected = selected[slot] == index;
+          ImGui::PushID(static_cast<int>(index));
+          if (ImGui::Selectable(catalog[slot][index].list_label.c_str(), is_selected)) {
+            queue_choice(slot, index);
+          }
+          if (is_selected) {
+            ImGui::SetItemDefaultFocus();
+          }
+          ImGui::PopID();
+        }
+        ImGui::EndCombo();
+      }
+
+      ImGui::TableSetColumnIndex(3);
+      if (ImGui::ArrowButton("##next", ImGuiDir_Right) && !catalog[slot].empty()) {
+        queue_choice(slot, (selected[slot] + 1) % catalog[slot].size());
+      }
+      ImGui::PopID();
+    }
+    ImGui::EndTable();
+  }
+  ImGui::EndDisabled();
+
+  if (!feedback.empty()) {
+    ImGui::TextColored(feedback_success ? ImVec4(0.25F, 0.80F, 0.58F, 1.0F)
+                                        : ImVec4(0.95F, 0.52F, 0.38F, 1.0F),
+                       "%s", feedback.c_str());
+  }
+  if (changer.applied != 0 || changer.failed != 0) {
+    ImGui::TextDisabled(u8"已应用 %llu，失败 %llu；最后：槽位 %u %s",
+                        static_cast<unsigned long long>(changer.applied),
+                        static_cast<unsigned long long>(changer.failed), changer.last_slot,
+                        changer.last_name.c_str());
+  }
+}
+
 void DrawDiagnosticsTab(const GameSnapshot& snapshot) {
   if (ImGui::BeginTable("diagnostics", 2, ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
     ImGui::TableSetupColumn(u8"字段", ImGuiTableColumnFlags_WidthFixed, 180.0F);
@@ -569,7 +690,7 @@ void DrawMenu(const GameSnapshot& snapshot) {
     return;
   }
   ImGui::SetNextWindowPos(ImVec2(22, 28), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(720, 650), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(900, 700), ImGuiCond_FirstUseEver);
   bool open = true;
   if (!ImGui::Begin("Sky QoE", &open, ImGuiWindowFlags_NoCollapse)) {
     ImGui::End();
@@ -580,7 +701,7 @@ void DrawMenu(const GameSnapshot& snapshot) {
                                               : ImVec4(0.95F, 0.62F, 0.22F, 1.0F);
   ImGui::TextColored(ready_color, "%s", snapshot.status.c_str());
   ImGui::SameLine(ImGui::GetWindowWidth() - 140.0F);
-  ImGui::TextDisabled("v0.3.0");
+  ImGui::TextDisabled("v0.4.0");
 
   if (ImGui::BeginTabBar("main-tabs")) {
     if (ImGui::BeginTabItem(u8"功能")) {
@@ -593,6 +714,10 @@ void DrawMenu(const GameSnapshot& snapshot) {
     }
     if (ImGui::BeginTabItem(u8"穿搭")) {
       DrawOutfitTab(snapshot);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem(u8"更衣")) {
+      DrawOutfitChangerTab(snapshot);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem(u8"世界")) {
@@ -775,6 +900,7 @@ DWORD WINAPI OverlayThread(void* module_pointer) {
     FreeLibraryAndExitThread(module, 1);
   }
 
+  InitializeOutfitChanger();
   InitializeLocalEffects();
   StartHttpServer();
 
@@ -839,6 +965,7 @@ DWORD WINAPI OverlayThread(void* module_pointer) {
   }
 
   StopHttpServer();
+  ShutdownOutfitChanger();
   ShutdownLocalEffects();
   ImGui_ImplDX11_Shutdown();
   ImGui_ImplWin32_Shutdown();

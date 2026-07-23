@@ -1,10 +1,12 @@
 #include "game_state.h"
 #include "local_effects.h"
+#include "outfit_changer.h"
 #include "overlay.h"
 #include "snapshot_json.h"
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <string>
 
@@ -76,6 +78,43 @@ extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_SetLocalEffectIn
   return skyqoe::LocalEffectInterval();
 }
 
+extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_GetOutfitCatalogCount(
+    std::uint64_t slot) {
+  const auto& catalog = skyqoe::GetOutfitCatalog();
+  return slot < catalog.size() ? catalog[static_cast<std::size_t>(slot)].size() : 0;
+}
+
+extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_FindOutfitIndex(
+    std::uint64_t slot, std::uint64_t id) {
+  const auto& catalog = skyqoe::GetOutfitCatalog();
+  if (slot >= catalog.size() || id > 0xFFFFFFFFULL) {
+    return 0;
+  }
+  const auto& definitions = catalog[static_cast<std::size_t>(slot)];
+  const auto found = std::find_if(definitions.begin(), definitions.end(),
+                                  [&](const skyqoe::OutfitDefinition& definition) {
+                                    return definition.id == static_cast<std::uint32_t>(id);
+                                  });
+  return found == definitions.end()
+             ? 0
+             : static_cast<std::uint64_t>(found - definitions.begin()) + 1;
+}
+
+extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_QueueOutfitByIndex(
+    std::uint64_t slot, std::uint64_t index) {
+  const auto& catalog = skyqoe::GetOutfitCatalog();
+  if (slot >= catalog.size() || index >= catalog[static_cast<std::size_t>(slot)].size()) {
+    return 0;
+  }
+  std::string error;
+  return skyqoe::QueueOutfitChange(
+             static_cast<std::uint32_t>(slot),
+             catalog[static_cast<std::size_t>(slot)][static_cast<std::size_t>(index)].name,
+             error)
+             ? 1
+             : 0;
+}
+
 extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_CopySnapshotJson(
     char* output, std::uint64_t capacity) {
   try {
@@ -106,7 +145,7 @@ extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_RequestShutdown(
 }
 
 extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_GetVersion(std::uint64_t) {
-  return 0x00030000;
+  return 0x00040000;
 }
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {

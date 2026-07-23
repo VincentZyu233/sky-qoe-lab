@@ -93,6 +93,8 @@ jobs:
             -Destination (Join-Path $licenses 'imgui-LICENSE.txt')
           Copy-Item -LiteralPath 'build\_deps\minhook-src\LICENSE.txt' `
             -Destination (Join-Path $licenses 'minhook-LICENSE.txt')
+          Copy-Item -LiteralPath 'build\_deps\nlohmann_json-src\LICENSE.MIT' `
+            -Destination (Join-Path $licenses 'nlohmann-json-LICENSE.MIT')
 
           Copy-Item -LiteralPath (Join-Path $bin 'SkyQoELoader.exe') -Destination $dist
           Copy-Item -LiteralPath (Join-Path $bin 'SkyQoEMenu.dll') -Destination $dist

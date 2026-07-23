@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SkyQoEMenu VERSION 0.3.0 LANGUAGES CXX)
+project(SkyQoEMenu VERSION 0.4.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
   set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+  add_compile_options("$<$<COMPILE_LANGUAGE:CXX>:/utf-8>")
 endif()
 
 if(MINGW)
@@ -32,6 +33,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(minhook)
 
+FetchContent_Declare(
+  nlohmann_json
+  URL https://github.com/nlohmann/json/releases/download/v3.11.3/json.tar.xz
+  URL_HASH SHA256=d6c65aca6b1ed68e7a182f4757257b107ae403032760ed6ef121c9d55e81757d
+)
+FetchContent_MakeAvailable(nlohmann_json)
+
 set(SKYQOE_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.tools/imgui" CACHE PATH "Dear ImGui source directory")
 if(NOT EXISTS "${SKYQOE_IMGUI_DIR}/imgui.cpp")
   FetchContent_Declare(
@@ -50,6 +58,7 @@ add_library(SkyQoEMenu SHARED
   src/http_server.cpp
   src/level_assets.cpp
   src/local_effects.cpp
+  src/outfit_changer.cpp
   src/overlay.cpp
   src/snapshot_json.cpp
   "${SKYQOE_IMGUI_DIR}/imgui.cpp"
@@ -90,6 +99,7 @@ target_link_libraries(SkyQoEMenu PRIVATE
   imm32
   ws2_32
   minhook
+  nlohmann_json::nlohmann_json
 )
 
 set_target_properties(SkyQoEMenu PROPERTIES

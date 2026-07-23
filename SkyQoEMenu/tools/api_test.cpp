@@ -28,12 +28,18 @@ int main(int argument_count, char** arguments) {
       reinterpret_cast<UnaryExport>(GetProcAddress(module, "SkyQoE_SetWaxLoopEnabled"));
   const auto set_effect_loop =
       reinterpret_cast<UnaryExport>(GetProcAddress(module, "SkyQoE_SetLocalEffectLoopEnabled"));
+  const auto get_outfit_count =
+      reinterpret_cast<UnaryExport>(GetProcAddress(module, "SkyQoE_GetOutfitCatalogCount"));
+  const auto queue_outfit =
+      reinterpret_cast<BinaryExport>(GetProcAddress(module, "SkyQoE_QueueOutfitByIndex"));
+  const auto find_outfit =
+      reinterpret_cast<BinaryExport>(GetProcAddress(module, "SkyQoE_FindOutfitIndex"));
   if (!get_version || !copy_snapshot || !request_shutdown || !teleport || !set_wax_loop ||
-      !set_effect_loop) {
+      !set_effect_loop || !get_outfit_count || !queue_outfit || !find_outfit) {
     std::cerr << "Required export is missing\n";
     return 2;
   }
-  if (get_version(0) != 0x00030000) {
+  if (get_version(0) != 0x00040000) {
     std::cerr << "Unexpected DLL version\n";
     return 3;
   }
@@ -46,28 +52,33 @@ int main(int argument_count, char** arguments) {
     return 5;
   }
   set_wax_loop(0);
+  if (get_outfit_count(0) != 0 || queue_outfit(0, 0) != 0 || find_outfit(0, 0) != 0) {
+    std::cerr << "Outfit changer unexpectedly initialized without Sky\n";
+    return 6;
+  }
 
   const std::uint64_t required = copy_snapshot(nullptr, 0);
   if (required <= 1 || required > 1024 * 1024) {
     std::cerr << "Invalid JSON size: " << required << '\n';
-    return 6;
+    return 7;
   }
   std::vector<char> buffer(static_cast<std::size_t>(required));
   if (copy_snapshot(buffer.data(), buffer.size()) != required) {
     std::cerr << "JSON copy failed\n";
-    return 7;
+    return 8;
   }
 
   const std::string json(buffer.data());
   if (json.empty() || json.front() != '{' || json.back() != '}' ||
-      json.find("\"version\":\"0.3.0\"") == std::string::npos ||
+      json.find("\"version\":\"0.4.0\"") == std::string::npos ||
       json.find("\"transform\":{") == std::string::npos ||
       json.find("\"slots\":[") == std::string::npos ||
       json.find("\"coordinateCandidates\":[") == std::string::npos ||
       json.find("\"world\":{") == std::string::npos ||
-      json.find("\"localEffects\":{") == std::string::npos) {
+      json.find("\"localEffects\":{") == std::string::npos ||
+      json.find("\"outfitChanger\":{") == std::string::npos) {
     std::cerr << "JSON structure check failed\n";
-    return 8;
+    return 9;
   }
 
   std::cout << json << '\n';
