@@ -4,6 +4,31 @@
 #include <shellapi.h>
 
 #include <iostream>
+#include <string>
+#include <string_view>
+
+namespace {
+
+std::string WideToUtf8(std::wstring_view value) {
+  if (value.empty()) {
+    return {};
+  }
+  const int required = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                                           static_cast<int>(value.size()), nullptr, 0,
+                                           nullptr, nullptr);
+  if (required <= 0) {
+    return {};
+  }
+  std::string output(static_cast<std::size_t>(required), '\0');
+  if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(),
+                          static_cast<int>(value.size()), output.data(), required,
+                          nullptr, nullptr) != required) {
+    return {};
+  }
+  return output;
+}
+
+}  // namespace
 
 int wmain() {
   int argument_count = 0;
@@ -18,7 +43,11 @@ int wmain() {
   const std::wstring level_wide = arguments[1];
   const std::wstring path = arguments[2];
   LocalFree(arguments);
-  const std::string level(level_wide.begin(), level_wide.end());
+  const std::string level = WideToUtf8(level_wide);
+  if (level.empty() && !level_wide.empty()) {
+    std::cerr << "Level name is not valid UTF-16\n";
+    return 1;
+  }
   const skyqoe::LevelAssetSnapshot snapshot = skyqoe::ParseLevelAssetFile(level, path);
   if (!snapshot.valid) {
     std::cerr << snapshot.status << '\n';

@@ -143,6 +143,12 @@ add_custom_target(SkyQoELoaderPayload DEPENDS "${SKYQOE_LOADER_PAYLOAD}")
 file(TO_CMAKE_PATH "${SKYQOE_LOADER_PAYLOAD}" SKYQOE_LOADER_PAYLOAD_RC_PATH)
 file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/loader.manifest"
      SKYQOE_LOADER_MANIFEST_RC_PATH)
+if(MINGW)
+  set(SKYQOE_LOADER_MANIFEST_RESOURCE
+      "1 RT_MANIFEST \"${SKYQOE_LOADER_MANIFEST_RC_PATH}\"")
+else()
+  set(SKYQOE_LOADER_MANIFEST_RESOURCE "")
+endif()
 configure_file(
   tools/loader.rc.in
   "${CMAKE_CURRENT_BINARY_DIR}/skyqoe_loader.rc"
@@ -195,5 +201,10 @@ if(MINGW)
     -Wall -Wextra -Wpedantic -finput-charset=UTF-8 -fexec-charset=UTF-8
   )
   target_link_options(SkyQoELoader PRIVATE -municode -static-libgcc -static-libstdc++)
+endif()
+if(MSVC)
+  target_link_options(SkyQoELoader PRIVATE
+    "/MANIFESTINPUT:${SKYQOE_LOADER_MANIFEST_RC_PATH}"
+  )
 endif()
 target_link_libraries(SkyQoELoader PRIVATE shell32 ole32 user32)
