@@ -1,6 +1,6 @@
 # Sky QoE Menu
 
-`SkyQoEMenu.dll` v0.4.0 是注入 Sky 进程的本地 ImGui QoE 与调试菜单喵。
+`SkyQoEMenu.dll` v0.4.1 是注入 Sky 进程的本地 ImGui QoE 与调试菜单喵。
 
 菜单使用独立透明 D3D11 窗口覆盖 Sky 的 Vulkan 窗口，不 Hook Vulkan swapchain，也不主动发送服务器请求喵。
 
@@ -10,12 +10,14 @@
 - 无断点分片发现 Manager、Avatar、Transform、Outfit 和穿搭数据库喵。
 - 显示 10 个穿搭槽位的基础 ID、覆盖 ID、生效 ID 和资源名喵。
 - “更衣”页加载全部 1536 项服饰定义，十个部位均可用左右箭头或下拉列表即时更换喵。
+- 更衣页可按 `internal_name` 做大小写不敏感的多关键词筛选，列表和左右箭头只遍历匹配项喵。
 - 提供前、后、左、右、上、下六向精准位移与统一距离输入喵。
 - 扫描 GameRoot、房间人数、附近 Transform 和当前关卡字符串喵。
 - 完整解析 TGCL `Objects.level.bin`，显示对象、属性、Wax 生成器和房间上限喵。
 - “循环传到烛火”按最近未访问 Wax 生成器坐标循环传送喵。
 - “循环生成全特效”在 EmitterBarn 游戏线程逐个生成 104 个已验证本地定义喵。
 - 左上常驻 HUD 汇总玩家、坐标、房间、关卡、实体和自动功能状态喵。
+- Sky 失去前台焦点时 Overlay 仍保持显示，仅在游戏最小化或窗口不可见时隐藏喵。
 - `Insert` 显示或隐藏菜单，`End` 安全停止 HTTP、移除 Hook 并卸载 DLL 喵。
 
 两个自动功能默认关闭喵。
@@ -77,14 +79,14 @@ HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
 本机工具位于 `.tools/gcc`、`.tools/ninja` 和 `.tools/imgui`，MinHook 1.3.4 与 nlohmann/json 3.11.3 由 CMake FetchContent 固定版本获取喵。
 
 ```powershell
-cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu-v040 -G Ninja `
+cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu-v041 -G Ninja `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_C_COMPILER=.\.tools\gcc\bin\gcc.exe `
   -DCMAKE_CXX_COMPILER=.\.tools\gcc\bin\g++.exe `
   -DCMAKE_MAKE_PROGRAM=.\.tools\ninja\ninja.exe `
   -DSKYQOE_IMGUI_DIR=.\.tools\imgui
 
-cmake --build .\.build\SkyQoEMenu-v040 --parallel
+cmake --build .\.build\SkyQoEMenu-v041 --parallel
 ```
 
 已经注入的 DLL 会被 Sky 锁定，不能原地覆盖；继续开发时应改用新的 build 目录喵。
@@ -94,13 +96,13 @@ cmake --build .\.build\SkyQoEMenu-v040 --parallel
 ## 验证
 
 ```powershell
-.\.build\SkyQoEMenu-v040\SkyQoEMenuApiTest.exe `
-  .\.build\SkyQoEMenu-v040\SkyQoEMenu.dll
+.\.build\SkyQoEMenu-v041\SkyQoEMenuApiTest.exe `
+  .\.build\SkyQoEMenu-v041\SkyQoEMenu.dll
 
-.\.build\SkyQoEMenu-v040\SkyLevelAssetInspect.exe RainForest `
+.\.build\SkyQoEMenu-v041\SkyLevelAssetInspect.exe RainForest `
   'G:\GGames\Steam\steamapps\common\Sky Children of the Light\data\assets\rain\Data\Levels\RainForest\Objects.level.bin'
 
-.\.build\SkyQoEMenu-v040\SkyQoELoader.exe --check --quiet
+.\.build\SkyQoEMenu-v041\SkyQoELoader.exe --check --quiet
 ```
 
 Harness 用于验证菜单布局、HTTP 端点和正常关闭后的端口释放喵。

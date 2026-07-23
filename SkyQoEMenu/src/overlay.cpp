@@ -17,6 +17,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <string>
+#include <string_view>
+#include <vector>
 
 #include "imgui.h"
 #include "imgui_impl_dx11.h"
@@ -56,6 +58,42 @@ bool FeatureEnabled(const char* name) {
     }
   }
   return false;
+}
+
+std::vector<std::string> TokenizeInternalNameSearch(std::string_view query) {
+  std::vector<std::string> tokens;
+  std::string token;
+  const auto flush = [&]() {
+    if (!token.empty()) {
+      tokens.push_back(token);
+      token.clear();
+    }
+  };
+  for (unsigned char character : query) {
+    if (character >= 'A' && character <= 'Z') {
+      token.push_back(static_cast<char>(character - 'A' + 'a'));
+    } else if ((character >= 'a' && character <= 'z') ||
+               (character >= '0' && character <= '9') || character >= 0x80U) {
+      token.push_back(static_cast<char>(character));
+    } else {
+      flush();
+    }
+  }
+  flush();
+  return tokens;
+}
+
+bool MatchesInternalNameSearch(const std::string& internal_name,
+                               const std::vector<std::string>& tokens) {
+  std::string lowered = internal_name;
+  std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char character) {
+    return character >= 'A' && character <= 'Z'
+               ? static_cast<char>(character - 'A' + 'a')
+               : static_cast<char>(character);
+  });
+  return std::all_of(tokens.begin(), tokens.end(), [&](const std::string& token) {
+    return lowered.find(token) != std::string::npos;
+  });
 }
 
 BOOL CALLBACK FindGameWindowCallback(HWND window, LPARAM parameter) {
@@ -139,10 +177,9 @@ void SetMenuInteraction(bool visible) {
   }
   SetWindowLongPtrW(g_overlay_window, GWL_EXSTYLE, style);
   SetWindowPos(g_overlay_window, HWND_TOPMOST, 0, 0, 0, 0,
-               SWP_NOMOVE | SWP_NOSIZE | SWP_NOOWNERZORDER | SWP_FRAMECHANGED);
-  if (visible) {
-    SetForegroundWindow(g_overlay_window);
-  } else if (g_game_window) {
+               SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER |
+                   SWP_FRAMECHANGED);
+  if (!visible && g_game_window) {
     SetForegroundWindow(g_game_window);
   }
 }
@@ -467,6 +504,7 @@ void DrawOutfitChangerTab(const GameSnapshot& snapshot) {
   };
   static std::array<std::size_t, 10> selected{};
   static std::array<std::string, 10> last_seen;
+  static char search[192]{};
   static std::string feedback;
   static bool feedback_success = false;
 
@@ -480,6 +518,37 @@ void DrawOutfitChangerTab(const GameSnapshot& snapshot) {
   if (changer.pending) {
     ImGui::TextColored(ImVec4(0.95F, 0.72F, 0.28F, 1.0F), u8"等待应用：%s",
                        changer.pending_name.c_str());
+  }
+
+  constexpr float kClearButtonWidth = 64.0F;
+  ImGui::SetNextItemWidth(
+      std::max(140.0F, ImGui::GetContentRegionAvail().x - kClearButtonWidth - 8.0F));
+  ImGui::InputTextWithHint("##outfit-search", u8"搜索 internal name", search,
+                           sizeof(search));
+  ImGui::SameLine();
+  if (ImGui::Button(u8"清空", ImVec2(kClearButtonWidth, 0.0F))) {
+    search[0] = '\0';
+  }
+
+  const std::vector<std::string> search_tokens = TokenizeInternalNameSearch(search);
+  const bool search_active = !search_tokens.empty();
+  std::array<std::vector<std::size_t>, 10> matches;
+  std::size_t total_matches = 0;
+  for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
+    matches[slot].reserve(catalog[slot].size());
+    for (std::size_t index = 0; index < catalog[slot].size(); ++index) {
+      const bool matched = !search_active ||
+                           (!search_tokens.empty() && MatchesInternalNameSearch(
+                                                         catalog[slot][index].name,
+                                                         search_tokens));
+      if (matched) {
+        matches[slot].push_back(index);
+      }
+    }
+    total_matches += matches[slot].size();
+  }
+  if (search_active) {
+    ImGui::TextDisabled(u8"匹配 %zu / %u", total_matches, changer.total_count);
   }
 
   for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
@@ -524,26 +593,42 @@ void DrawOutfitChangerTab(const GameSnapshot& snapshot) {
     ImGui::TableSetupColumn(u8"下一个", ImGuiTableColumnFlags_WidthFixed, 54.0F);
     ImGui::TableHeadersRow();
     for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
+      const auto& choices = matches[slot];
+      const auto selected_match = std::find(choices.begin(), choices.end(), selected[slot]);
+      const bool selection_matches = selected_match != choices.end();
       ImGui::PushID(static_cast<int>(slot));
       ImGui::TableNextRow(0, 36.0F);
       ImGui::TableSetColumnIndex(0);
       ImGui::AlignTextToFramePadding();
-      ImGui::Text("%s (%zu)", kSlotLabels[slot], catalog[slot].size());
+      if (search_active) {
+        ImGui::Text("%s (%zu/%zu)", kSlotLabels[slot], choices.size(),
+                    catalog[slot].size());
+      } else {
+        ImGui::Text("%s (%zu)", kSlotLabels[slot], catalog[slot].size());
+      }
+
+      ImGui::BeginDisabled(choices.empty());
 
       ImGui::TableSetColumnIndex(1);
-      if (ImGui::ArrowButton("##previous", ImGuiDir_Left) && !catalog[slot].empty()) {
-        const std::size_t previous =
-            (selected[slot] + catalog[slot].size() - 1) % catalog[slot].size();
+      if (ImGui::ArrowButton("##previous", ImGuiDir_Left)) {
+        const std::size_t previous = selection_matches
+                                         ? choices[(static_cast<std::size_t>(
+                                                        selected_match - choices.begin()) +
+                                                    choices.size() - 1) %
+                                                   choices.size()]
+                                         : choices.back();
         queue_choice(slot, previous);
       }
 
       ImGui::TableSetColumnIndex(2);
       ImGui::SetNextItemWidth(-1.0F);
-      const char* preview = catalog[slot].empty()
-                                ? "-"
-                                : catalog[slot][selected[slot] % catalog[slot].size()].name.c_str();
+      const char* preview = choices.empty()
+                                ? u8"无匹配"
+                                : selection_matches
+                                      ? catalog[slot][selected[slot]].name.c_str()
+                                      : u8"选择匹配项";
       if (ImGui::BeginCombo("##catalog", preview, ImGuiComboFlags_HeightLarge)) {
-        for (std::size_t index = 0; index < catalog[slot].size(); ++index) {
+        for (const std::size_t index : choices) {
           const bool is_selected = selected[slot] == index;
           ImGui::PushID(static_cast<int>(index));
           if (ImGui::Selectable(catalog[slot][index].list_label.c_str(), is_selected)) {
@@ -558,9 +643,16 @@ void DrawOutfitChangerTab(const GameSnapshot& snapshot) {
       }
 
       ImGui::TableSetColumnIndex(3);
-      if (ImGui::ArrowButton("##next", ImGuiDir_Right) && !catalog[slot].empty()) {
-        queue_choice(slot, (selected[slot] + 1) % catalog[slot].size());
+      if (ImGui::ArrowButton("##next", ImGuiDir_Right)) {
+        const std::size_t next = selection_matches
+                                     ? choices[(static_cast<std::size_t>(
+                                                    selected_match - choices.begin()) +
+                                                1) %
+                                               choices.size()]
+                                     : choices.front();
+        queue_choice(slot, next);
       }
+      ImGui::EndDisabled();
       ImGui::PopID();
     }
     ImGui::EndTable();
@@ -697,11 +789,24 @@ void DrawMenu(const GameSnapshot& snapshot) {
     return;
   }
 
+  const ImVec2 display_size = ImGui::GetIO().DisplaySize;
+  const ImVec2 window_size = ImGui::GetWindowSize();
+  const ImVec2 window_position = ImGui::GetWindowPos();
+  if (display_size.x > 16.0F && display_size.y > 16.0F) {
+    const ImVec2 maximum_position(std::max(8.0F, display_size.x - window_size.x - 8.0F),
+                                  std::max(8.0F, display_size.y - window_size.y - 8.0F));
+    const ImVec2 clamped_position(std::clamp(window_position.x, 8.0F, maximum_position.x),
+                                  std::clamp(window_position.y, 8.0F, maximum_position.y));
+    if (clamped_position.x != window_position.x || clamped_position.y != window_position.y) {
+      ImGui::SetWindowPos(clamped_position);
+    }
+  }
+
   const ImVec4 ready_color = snapshot.valid ? ImVec4(0.25F, 0.80F, 0.58F, 1.0F)
                                               : ImVec4(0.95F, 0.62F, 0.22F, 1.0F);
   ImGui::TextColored(ready_color, "%s", snapshot.status.c_str());
   ImGui::SameLine(ImGui::GetWindowWidth() - 140.0F);
-  ImGui::TextDisabled("v0.4.0");
+  ImGui::TextDisabled("v0.4.1");
 
   if (ImGui::BeginTabBar("main-tabs")) {
     if (ImGui::BeginTabItem(u8"功能")) {
@@ -836,15 +941,16 @@ bool CreateOverlayWindow(HINSTANCE instance) {
   const int width = client.right - client.left;
   const int height = client.bottom - client.top;
   g_overlay_window = CreateWindowExW(
-      WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW, window_class.lpszClassName, L"Sky QoE",
-      WS_POPUP, origin.x, origin.y, width, height, g_game_window, nullptr, instance, nullptr);
+      WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+      window_class.lpszClassName, L"Sky QoE", WS_POPUP, origin.x, origin.y, width, height,
+      g_game_window, nullptr, instance, nullptr);
   if (!g_overlay_window) {
     return false;
   }
   SetLayeredWindowAttributes(g_overlay_window, RGB(0, 0, 0), 255, LWA_COLORKEY | LWA_ALPHA);
   const MARGINS margins{-1, -1, -1, -1};
   DwmExtendFrameIntoClientArea(g_overlay_window, &margins);
-  ShowWindow(g_overlay_window, SW_SHOW);
+  ShowWindow(g_overlay_window, SW_SHOWNOACTIVATE);
   UpdateWindow(g_overlay_window);
   return true;
 }
@@ -853,9 +959,7 @@ void SyncOverlayToGame() {
   if (!g_game_window || !g_overlay_window) {
     return;
   }
-  const HWND foreground = GetForegroundWindow();
-  const bool active = foreground == g_game_window || foreground == g_overlay_window;
-  if (!active || IsIconic(g_game_window) || !IsWindowVisible(g_game_window)) {
+  if (IsIconic(g_game_window) || !IsWindowVisible(g_game_window)) {
     ShowWindow(g_overlay_window, SW_HIDE);
     return;
   }

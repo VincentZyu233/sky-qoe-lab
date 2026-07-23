@@ -314,7 +314,7 @@ std::string BuildSnapshotJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
   std::string output;
   output.reserve(64 * 1024);
-  output += "{\"version\":\"0.4.0\",\"build\":";
+  output += "{\"version\":\"0.4.1\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"player\":";
   AppendPlayer(output, snapshot);
@@ -351,7 +351,7 @@ std::string BuildSnapshotJson() {
 
 std::string BuildPlayerJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"version\":\"0.4.0\",\"build\":";
+  std::string output = "{\"version\":\"0.4.1\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"player\":";
   AppendPlayer(output, snapshot);
@@ -361,7 +361,7 @@ std::string BuildPlayerJson() {
 
 std::string BuildWorldJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"version\":\"0.4.0\",\"build\":";
+  std::string output = "{\"version\":\"0.4.1\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"world\":";
   AppendWorld(output, snapshot);
@@ -378,7 +378,7 @@ std::string BuildOutfitCatalogJson() {
   const auto& catalog = GetOutfitCatalog();
   std::string output;
   output.reserve(384 * 1024);
-  output += "{\"version\":\"0.4.0\",\"state\":";
+  output += "{\"version\":\"0.4.1\",\"state\":";
   AppendOutfitChanger(output, changer);
   output += ",\"slots\":[";
   for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
@@ -413,7 +413,7 @@ std::string BuildOutfitCatalogJson() {
 std::string BuildHealthJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
   const OutfitChangerSnapshot changer = GetOutfitChangerSnapshot();
-  std::string output = "{\"ok\":true,\"version\":\"0.4.0\",\"buildSupported\":";
+  std::string output = "{\"ok\":true,\"version\":\"0.4.1\",\"buildSupported\":";
   output += snapshot.build.supported ? "true" : "false";
   output += ",\"stateValid\":";
   output += snapshot.valid ? "true" : "false";
@@ -424,7 +424,7 @@ std::string BuildHealthJson() {
 }
 
 std::string BuildSchemaJson() {
-  return R"({"version":"0.4.0","readOnly":true,"bind":"127.0.0.1:27891","endpoints":{"/health":"service and build readiness","/v1/state":"complete player, outfit, world, changer and local-effect snapshot","/v1/player":"player transform and outfit slots","/v1/world":"room, level assets, nearby transforms, wax and local effects","/v1/outfits":"all outfit definitions, IDs, seasons and closet flags","/v1/schema":"this endpoint map"},"addressEncoding":"hexadecimal strings","units":{"position":"game world units","distance":"game world units","interval":"milliseconds"}})";
+  return R"({"version":"0.4.1","readOnly":true,"bind":"127.0.0.1:27891","endpoints":{"/health":"service and build readiness","/v1/state":"complete player, outfit, world, changer and local-effect snapshot","/v1/player":"player transform and outfit slots","/v1/world":"room, level assets, nearby transforms, wax and local effects","/v1/outfits":"all outfit definitions, IDs, seasons and closet flags","/v1/schema":"this endpoint map"},"addressEncoding":"hexadecimal strings","units":{"position":"game world units","distance":"game world units","interval":"milliseconds"}})";
 }
 
 }  // namespace skyqoe
