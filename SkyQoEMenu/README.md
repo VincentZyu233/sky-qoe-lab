@@ -1,58 +1,79 @@
 # Sky QoE Menu
 
-`SkyQoEMenu.dll` v0.2.0 是注入 Sky 进程的本地 ImGui 模组菜单喵。
+`SkyQoEMenu.dll` v0.3.0 是注入 Sky 进程的本地 ImGui QoE 与调试菜单喵。
 
-首版使用独立透明 D3D11 窗口覆盖在 Sky 的 Vulkan 窗口上，不 Hook 游戏 swapchain，也不发出任何服务器请求喵。
+菜单使用独立透明 D3D11 窗口覆盖 Sky 的 Vulkan 窗口，不 Hook Vulkan swapchain，也不主动发送服务器请求喵。
 
-## 当前功能
+## 功能
 
-- 功能注册与逐项启停菜单喵。
-- 当前构建 PE 时间戳与映像大小校验喵。
-- Manager、Avatar、Outfit 与穿搭数据库状态喵。
-- 10 个穿搭槽位的基础 ID、生效 ID 与资源名喵。
-- Avatar 内存中的动态三浮点坐标候选扫描喵。
-- 可调原始偏移与连续 float 查看器喵。
-- 无断点的分片 Avatar 自动发现，每次刷新最多扫描 8 MiB 可读私有内存喵。
-- 自动发现联合校验 active、flags、对象分离、Outfit 双向指针、数据库哈希表和可解析资源名，避免把 Avatar 内嵌对象识别成 Outfit 喵。
-- `SkyQoE_CopySnapshotJson` 导出完整玩家、穿搭槽位和坐标候选 JSON 喵。
-- 玩家页提供统一距离输入以及前、后、左、右、上、下六向精准位移按钮喵。
-- 前后左右按角色水平朝向移动，上下沿世界 Y 轴移动，位置双写失败时自动回滚喵。
-- `Insert` 切换菜单，`End` 安全卸载 DLL 喵。
+- 校验 Sky PE 时间戳 `0x6A582C8E` 与 `SizeOfImage=0x2FB2000` 后才启用写入或 Hook 功能喵。
+- 无断点分片发现 Manager、Avatar、Transform、Outfit 和穿搭数据库喵。
+- 显示 10 个穿搭槽位的基础 ID、覆盖 ID、生效 ID 和资源名喵。
+- 提供前、后、左、右、上、下六向精准位移与统一距离输入喵。
+- 扫描 GameRoot、房间人数、附近 Transform 和当前关卡字符串喵。
+- 完整解析 TGCL `Objects.level.bin`，显示对象、属性、Wax 生成器和房间上限喵。
+- “循环传到烛火”按最近未访问 Wax 生成器坐标循环传送喵。
+- “循环生成全特效”在 EmitterBarn 游戏线程逐个生成 104 个已验证本地定义喵。
+- 左上常驻 HUD 汇总玩家、坐标、房间、关卡、实体和自动功能状态喵。
+- `Insert` 显示或隐藏菜单，`End` 安全停止 HTTP、移除 Hook 并卸载 DLL 喵。
+
+两个自动功能默认关闭喵。
+
+烛火默认间隔为 900 ms，特效默认间隔为 35 ms，特效池达到 2800/3000 时自动暂停并在低于 2400 后恢复喵。
+
+## 外部接口
+
+注入成功后只读 HTTP 服务监听 `127.0.0.1:27891` 喵。
+
+```text
+GET /health
+GET /v1/state
+GET /v1/player
+GET /v1/world
+GET /v1/schema
+```
+
+`SkyQoE_CopySnapshotJson` 导出与 `/v1/state` 使用同一套 JSON 序列化代码喵。
+
+现有导出还包括 Manager/Avatar/Outfit 读取、相对传送、菜单切换、安全卸载和两个自动功能的开关/间隔控制喵。
+
+HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
 
 ## 构建
 
-工作区工具路径如下喵：
-
-```text
-.tools/gcc/bin/g++.exe
-.tools/ninja/ninja.exe
-.tools/imgui
-```
-
-配置与构建命令如下喵：
+本机工具位于 `.tools/gcc`、`.tools/ninja` 和 `.tools/imgui`，MinHook 1.3.4 由 CMake FetchContent 固定版本获取喵。
 
 ```powershell
-$env:PATH="D:\Downloads\temp\.tools\gcc\bin;D:\Downloads\temp\.tools\ninja;$env:PATH"
-cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=gcc -DCMAKE_CXX_COMPILER=g++
-cmake --build .\.build\SkyQoEMenu
+cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu-v032 -G Ninja `
+  -DCMAKE_BUILD_TYPE=Release `
+  -DCMAKE_C_COMPILER=.\.tools\gcc\bin\gcc.exe `
+  -DCMAKE_CXX_COMPILER=.\.tools\gcc\bin\g++.exe `
+  -DCMAKE_MAKE_PROGRAM=.\.tools\ninja\ninja.exe `
+  -DSKYQOE_IMGUI_DIR=.\.tools\imgui
+
+cmake --build .\.build\SkyQoEMenu-v032 --parallel
 ```
 
-## CE 热注入
+已经注入的 DLL 会被 Sky 锁定，不能原地覆盖；继续开发时应改用新的 build 目录喵。
 
-DLL 可以通过 CE Bridge 调用 `injectDLL` 热注入，不需要重启 Sky 喵。
-
-正常情况下菜单会自行发现本地 Avatar，不需要设置断点或手动提供 Manager 喵。
-
-Bridge 可通过 `CeBridge/requests/sky_menu_snapshot.lua` 调用 `SkyQoE_CopySnapshotJson` 读取完整快照喵。
-
-诊断时仍可调用 `SkyQoE_SetManager` 手动提供 Manager；`SkyQoE_GetAvatar`、`SkyQoE_GetOutfit`、`SkyQoE_GetOutfitDatabase` 与 `SkyQoE_GetEffectiveOutfitId` 可读取标量状态喵。
-
-`SkyQoE_TeleportRelative(direction, distance_millimeters)` 可供 Bridge 调用，方向值依次为前、后、左、右、上、下的 `0..5` 喵。
-
-当前版本只支持 PE 时间戳 `0x6A582C8E`、`SizeOfImage=0x2FB2000` 的 Sky 构建喵。
-
-离线 API 回归测试如下喵：
+## 验证
 
 ```powershell
-.\.build\SkyQoEMenu\SkyQoEMenuApiTest.exe .\.build\SkyQoEMenu\SkyQoEMenu.dll
+.\.build\SkyQoEMenu-v032\SkyQoEMenuApiTest.exe `
+  .\.build\SkyQoEMenu-v032\SkyQoEMenu.dll
+
+.\.build\SkyQoEMenu-v032\SkyLevelAssetInspect.exe RainForest `
+  'G:\GGames\Steam\steamapps\common\Sky Children of the Light\data\assets\rain\Data\Levels\RainForest\Objects.level.bin'
 ```
+
+Harness 用于验证菜单布局、HTTP 端点和正常关闭后的端口释放喵。
+
+实机热重载使用 `CeBridge/requests/sky_menu_reload.lua`，脚本会先安全卸载旧 DLL，再注入并校验 v0.3.0 导出喵。
+
+## 已知边界
+
+- 所有 RVA 只适用于时间戳 `0x6A582C8E` 的当前 Sky 构建喵。
+- 当前关卡要等待约 27 秒的首轮私有内存共识扫描，不能采用首个历史 telemetry 字符串喵。
+- 烛火循环使用 TGCL 静态生成器坐标，尚未按运行时拾取状态剔除已清空点喵。
+- 特效目录来自 214 个静态调用点归纳出的 104 个已加载定义，不声称覆盖资源包中从未被当前可执行文件引用的全部素材喵。
+- 详细地址、格式、工具、实机结果和失败路径统一记录在根目录 `README.md` 喵。

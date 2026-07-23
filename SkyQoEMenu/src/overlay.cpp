@@ -1,6 +1,8 @@
 #include "overlay.h"
 
 #include "game_state.h"
+#include "http_server.h"
+#include "local_effects.h"
 
 #include <d3d11.h>
 #include <dwmapi.h>
@@ -42,8 +44,7 @@ struct FeatureToggle {
   bool supported;
 };
 
-std::array<FeatureToggle, 4> g_features = {{{u8"调试 HUD", u8"监视", true, true},
-                                           {u8"玩家监视", u8"监视", true, true},
+std::array<FeatureToggle, 3> g_features = {{{u8"玩家监视", u8"监视", true, true},
                                            {u8"穿搭监视", u8"监视", true, true},
                                            {u8"坐标候选扫描", u8"诊断", true, true}}};
 
@@ -215,6 +216,47 @@ void DrawFeatureTab(const GameSnapshot& snapshot) {
     ImGui::EndTable();
   }
   GetGameState().SetCoordinateScanEnabled(FeatureEnabled(u8"坐标候选扫描"));
+
+  ImGui::SeparatorText(u8"自动功能");
+  bool wax_loop = GetGameState().WaxLoopEnabled();
+  if (ImGui::Checkbox(u8"循环传到烛火", &wax_loop)) {
+    GetGameState().SetWaxLoopEnabled(wax_loop);
+  }
+  std::uint32_t interval = GetGameState().WaxLoopInterval();
+  ImGui::SetNextItemWidth(150.0F);
+  if (ImGui::InputScalar(u8"烛火间隔 (ms)", ImGuiDataType_U32, &interval)) {
+    GetGameState().SetWaxLoopInterval(interval);
+  }
+  ImGui::TextDisabled(u8"关卡 %s   目标 %u / 可用 %zu", snapshot.world.level.empty()
+                                                               ? "-"
+                                                               : snapshot.world.level.c_str(),
+                      snapshot.world.wax_spawner_count,
+                      static_cast<std::size_t>(std::count_if(
+                          snapshot.world.wax_targets.begin(), snapshot.world.wax_targets.end(),
+                          [](const auto& target) { return target.usable; })));
+  ImGui::TextWrapped("%s", snapshot.world.wax_loop_status.c_str());
+
+  ImGui::Spacing();
+  bool effect_loop = LocalEffectLoopEnabled();
+  ImGui::BeginDisabled(!snapshot.local_effects.hook_installed);
+  if (ImGui::Checkbox(u8"循环生成全特效", &effect_loop)) {
+    SetLocalEffectLoopEnabled(effect_loop);
+  }
+  ImGui::EndDisabled();
+  std::uint32_t effect_interval = LocalEffectInterval();
+  ImGui::SetNextItemWidth(150.0F);
+  if (ImGui::InputScalar(u8"特效间隔 (ms)", ImGuiDataType_U32, &effect_interval)) {
+    SetLocalEffectInterval(effect_interval);
+  }
+  ImGui::TextDisabled(u8"本地定义 %u / %u   进度 %u   已生成 %llu",
+                      snapshot.local_effects.loaded_count,
+                      snapshot.local_effects.catalog_count,
+                      snapshot.local_effects.next_index,
+                      static_cast<unsigned long long>(snapshot.local_effects.generated));
+  ImGui::TextDisabled(u8"Emitter 池 %u / %u",
+                      snapshot.local_effects.pool_active,
+                      snapshot.local_effects.pool_capacity);
+  ImGui::TextWrapped("%s", snapshot.local_effects.status.c_str());
 }
 
 void DrawTeleportControls(const GameSnapshot& snapshot) {
@@ -436,12 +478,98 @@ void DrawDiagnosticsTab(const GameSnapshot& snapshot) {
   }
 }
 
+void DrawWorldTab(const GameSnapshot& snapshot) {
+  const auto& world = snapshot.world;
+  if (ImGui::BeginTable("world-status", 2,
+                        ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH)) {
+    ImGui::TableSetupColumn(u8"字段", ImGuiTableColumnFlags_WidthFixed, 180.0F);
+    ImGui::TableSetupColumn(u8"值", ImGuiTableColumnFlags_WidthStretch);
+    DrawStatusValue(u8"关卡", world.level.empty() ? "-" : world.level);
+    DrawStatusValue(u8"关卡来源", world.level_source.empty() ? "-" : world.level_source);
+    DrawStatusValue(u8"游戏主对象", FormatAddress(world.root));
+    DrawStatusValue(u8"Manager 来源", world.manager_source.empty() ? "-" : world.manager_source);
+    const std::string room = std::to_string(world.room_current_players) + " / " +
+                             (world.room_max_players == 0 ? "?" :
+                              std::to_string(world.room_max_players));
+    DrawStatusValue(u8"房间人数", room);
+    DrawStatusValue(u8"Avatar 槽位容量", std::to_string(world.avatar_capacity));
+    DrawStatusValue(u8"关卡对象", std::to_string(world.level_object_count));
+    DrawStatusValue(u8"关卡属性", std::to_string(world.level_property_count));
+    DrawStatusValue(u8"关卡来源文件", std::to_string(world.level_source_count));
+    DrawStatusValue(u8"Wax 生成器", std::to_string(world.wax_spawner_count));
+    DrawStatusValue(u8"运行时 Transform", std::to_string(world.transform_candidates));
+    DrawStatusValue(u8"附近 Transform (100m)", std::to_string(world.nearby_transform_count));
+    DrawStatusValue(u8"模块对象头候选", std::to_string(world.object_header_candidates));
+    DrawStatusValue(u8"世界扫描", world.scan_status);
+    ImGui::EndTable();
+  }
+
+  ImGui::SeparatorText(u8"Wax 目标");
+  if (world.wax_targets.empty()) {
+    ImGui::TextDisabled(u8"等待关卡资源解析");
+  } else if (ImGui::BeginTable("wax-targets", 6,
+                               ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                   ImGuiTableFlags_ScrollY,
+                               ImVec2(0, 210))) {
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("#", ImGuiTableColumnFlags_WidthFixed, 36.0F);
+    ImGui::TableSetupColumn("X");
+    ImGui::TableSetupColumn("Y");
+    ImGui::TableSetupColumn("Z");
+    ImGui::TableSetupColumn(u8"网络", ImGuiTableColumnFlags_WidthFixed, 48.0F);
+    ImGui::TableSetupColumn(u8"可用", ImGuiTableColumnFlags_WidthFixed, 48.0F);
+    ImGui::TableHeadersRow();
+    for (std::size_t index = 0; index < world.wax_targets.size(); ++index) {
+      const auto& target = world.wax_targets[index];
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::Text("%zu", index + 1);
+      for (int component = 0; component < 3; ++component) {
+        ImGui::TableSetColumnIndex(component + 1);
+        ImGui::Text("%.3f", target.position[static_cast<std::size_t>(component)]);
+      }
+      ImGui::TableSetColumnIndex(4);
+      ImGui::TextUnformatted(target.networked ? u8"是" : u8"否");
+      ImGui::TableSetColumnIndex(5);
+      ImGui::TextUnformatted(target.usable ? u8"是" : u8"否");
+    }
+    ImGui::EndTable();
+  }
+
+  ImGui::SeparatorText(u8"附近 Transform");
+  if (world.nearby_transforms.empty()) {
+    ImGui::TextDisabled(u8"等待完整世界扫描");
+  } else if (ImGui::BeginTable("nearby-transforms", 5,
+                               ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersInnerH |
+                                   ImGuiTableFlags_ScrollY,
+                               ImVec2(0, 180))) {
+    ImGui::TableSetupColumn(u8"地址", ImGuiTableColumnFlags_WidthFixed, 120.0F);
+    ImGui::TableSetupColumn("X");
+    ImGui::TableSetupColumn("Y");
+    ImGui::TableSetupColumn("Z");
+    ImGui::TableSetupColumn(u8"距离");
+    ImGui::TableHeadersRow();
+    for (const auto& item : world.nearby_transforms) {
+      ImGui::TableNextRow();
+      ImGui::TableSetColumnIndex(0);
+      ImGui::TextUnformatted(FormatAddress(item.address).c_str());
+      for (int component = 0; component < 3; ++component) {
+        ImGui::TableSetColumnIndex(component + 1);
+        ImGui::Text("%.2f", item.position[static_cast<std::size_t>(component)]);
+      }
+      ImGui::TableSetColumnIndex(4);
+      ImGui::Text("%.1f", item.distance);
+    }
+    ImGui::EndTable();
+  }
+}
+
 void DrawMenu(const GameSnapshot& snapshot) {
   if (!g_menu_visible.load(std::memory_order_acquire)) {
     return;
   }
   ImGui::SetNextWindowPos(ImVec2(22, 28), ImGuiCond_FirstUseEver);
-  ImGui::SetNextWindowSize(ImVec2(650, 610), ImGuiCond_FirstUseEver);
+  ImGui::SetNextWindowSize(ImVec2(720, 650), ImGuiCond_FirstUseEver);
   bool open = true;
   if (!ImGui::Begin("Sky QoE", &open, ImGuiWindowFlags_NoCollapse)) {
     ImGui::End();
@@ -452,7 +580,7 @@ void DrawMenu(const GameSnapshot& snapshot) {
                                               : ImVec4(0.95F, 0.62F, 0.22F, 1.0F);
   ImGui::TextColored(ready_color, "%s", snapshot.status.c_str());
   ImGui::SameLine(ImGui::GetWindowWidth() - 140.0F);
-  ImGui::TextDisabled("v0.2.0");
+  ImGui::TextDisabled("v0.3.0");
 
   if (ImGui::BeginTabBar("main-tabs")) {
     if (ImGui::BeginTabItem(u8"功能")) {
@@ -465,6 +593,10 @@ void DrawMenu(const GameSnapshot& snapshot) {
     }
     if (ImGui::BeginTabItem(u8"穿搭")) {
       DrawOutfitTab(snapshot);
+      ImGui::EndTabItem();
+    }
+    if (ImGui::BeginTabItem(u8"世界")) {
+      DrawWorldTab(snapshot);
       ImGui::EndTabItem();
     }
     if (ImGui::BeginTabItem(u8"诊断")) {
@@ -481,9 +613,6 @@ void DrawMenu(const GameSnapshot& snapshot) {
 }
 
 void DrawHud(const GameSnapshot& snapshot) {
-  if (!FeatureEnabled(u8"调试 HUD")) {
-    return;
-  }
   ImGui::SetNextWindowPos(ImVec2(14, 14), ImGuiCond_Always);
   ImGui::SetNextWindowBgAlpha(0.62F);
   const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize |
@@ -494,11 +623,31 @@ void DrawHud(const GameSnapshot& snapshot) {
                                       : ImVec4(0.95F, 0.64F, 0.25F, 1.0F),
                        "Sky QoE");
     ImGui::Text("Avatar %s", FormatAddress(snapshot.avatar).c_str());
-    if (!snapshot.coordinate_candidates.empty()) {
-      const auto& position = snapshot.coordinate_candidates.front();
-      ImGui::Text("+0x%X  %.3f  %.3f  %.3f", position.offset, position.value[0], position.value[1],
-                  position.value[2]);
+    if (snapshot.transform.valid) {
+      ImGui::Text("XYZ %.2f  %.2f  %.2f", snapshot.transform.position[0],
+                  snapshot.transform.position[1], snapshot.transform.position[2]);
     }
+    ImGui::Text(u8"房间 %u / %s   槽位 %u", snapshot.world.room_current_players,
+                snapshot.world.room_max_players == 0
+                    ? "?"
+                    : std::to_string(snapshot.world.room_max_players).c_str(),
+                snapshot.world.avatar_capacity);
+    ImGui::Text(u8"关卡 %s   对象 %u   属性 %u",
+                snapshot.world.level.empty() ? "-" : snapshot.world.level.c_str(),
+                snapshot.world.level_object_count, snapshot.world.level_property_count);
+    ImGui::Text(u8"附近 %llu   Transform %llu   Wax %u",
+                static_cast<unsigned long long>(snapshot.world.nearby_transform_count),
+                static_cast<unsigned long long>(snapshot.world.transform_candidates),
+                snapshot.world.wax_spawner_count);
+    ImGui::TextColored(snapshot.world.wax_loop_enabled
+                           ? ImVec4(0.95F, 0.72F, 0.28F, 1.0F)
+                           : ImVec4(0.58F, 0.62F, 0.66F, 1.0F),
+                       u8"烛火循环 %s", snapshot.world.wax_loop_enabled ? u8"开" : u8"关");
+    ImGui::SameLine();
+    ImGui::TextColored(snapshot.local_effects.enabled
+                           ? ImVec4(0.92F, 0.48F, 0.76F, 1.0F)
+                           : ImVec4(0.58F, 0.62F, 0.66F, 1.0F),
+                       u8"特效 %s", snapshot.local_effects.enabled ? u8"开" : u8"关");
   }
   ImGui::End();
 }
@@ -626,6 +775,9 @@ DWORD WINAPI OverlayThread(void* module_pointer) {
     FreeLibraryAndExitThread(module, 1);
   }
 
+  InitializeLocalEffects();
+  StartHttpServer();
+
   IMGUI_CHECKVERSION();
   ImGui::CreateContext();
   ImGuiIO& io = ImGui::GetIO();
@@ -669,6 +821,7 @@ DWORD WINAPI OverlayThread(void* module_pointer) {
       GetGameState().Refresh();
       last_refresh = now;
     }
+    GetGameState().TickAutomation();
     const GameSnapshot snapshot = GetGameState().Snapshot();
 
     ImGui_ImplDX11_NewFrame();
@@ -685,6 +838,8 @@ DWORD WINAPI OverlayThread(void* module_pointer) {
     g_swap_chain->Present(1, 0);
   }
 
+  StopHttpServer();
+  ShutdownLocalEffects();
   ImGui_ImplDX11_Shutdown();
   ImGui_ImplWin32_Shutdown();
   ImGui::DestroyContext();

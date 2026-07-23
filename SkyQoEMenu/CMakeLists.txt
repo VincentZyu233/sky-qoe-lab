@@ -1,14 +1,23 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SkyQoEMenu VERSION 0.2.0 LANGUAGES CXX)
+project(SkyQoEMenu VERSION 0.3.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+include(FetchContent)
+
+FetchContent_Declare(
+  minhook
+  GIT_REPOSITORY https://github.com/TsudaKageyu/minhook.git
+  GIT_TAG v1.3.4
+  GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(minhook)
+
 set(SKYQOE_IMGUI_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../.tools/imgui" CACHE PATH "Dear ImGui source directory")
 if(NOT EXISTS "${SKYQOE_IMGUI_DIR}/imgui.cpp")
-  include(FetchContent)
   FetchContent_Declare(
     imgui
     GIT_REPOSITORY https://github.com/ocornut/imgui.git
@@ -22,7 +31,11 @@ endif()
 add_library(SkyQoEMenu SHARED
   src/dllmain.cpp
   src/game_state.cpp
+  src/http_server.cpp
+  src/level_assets.cpp
+  src/local_effects.cpp
   src/overlay.cpp
+  src/snapshot_json.cpp
   "${SKYQOE_IMGUI_DIR}/imgui.cpp"
   "${SKYQOE_IMGUI_DIR}/imgui_draw.cpp"
   "${SKYQOE_IMGUI_DIR}/imgui_tables.cpp"
@@ -59,6 +72,8 @@ target_link_libraries(SkyQoEMenu PRIVATE
   gdi32
   shell32
   imm32
+  ws2_32
+  minhook
 )
 
 set_target_properties(SkyQoEMenu PROPERTIES
@@ -85,3 +100,14 @@ if(MINGW)
   target_link_options(SkyProcessDump PRIVATE -municode -static-libgcc -static-libstdc++)
 endif()
 target_link_libraries(SkyProcessDump PRIVATE dbghelp)
+
+add_executable(SkyLevelAssetInspect
+  tools/level_asset_inspect.cpp
+  src/level_assets.cpp
+)
+target_include_directories(SkyLevelAssetInspect PRIVATE src)
+target_compile_definitions(SkyLevelAssetInspect PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+if(MINGW)
+  target_link_options(SkyLevelAssetInspect PRIVATE -municode -static-libgcc -static-libstdc++)
+endif()
+target_link_libraries(SkyLevelAssetInspect PRIVATE shell32)

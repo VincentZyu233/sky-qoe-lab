@@ -24,11 +24,16 @@ int main(int argument_count, char** arguments) {
       reinterpret_cast<UnaryExport>(GetProcAddress(module, "SkyQoE_RequestShutdown"));
   const auto teleport =
       reinterpret_cast<BinaryExport>(GetProcAddress(module, "SkyQoE_TeleportRelative"));
-  if (!get_version || !copy_snapshot || !request_shutdown || !teleport) {
+  const auto set_wax_loop =
+      reinterpret_cast<UnaryExport>(GetProcAddress(module, "SkyQoE_SetWaxLoopEnabled"));
+  const auto set_effect_loop =
+      reinterpret_cast<UnaryExport>(GetProcAddress(module, "SkyQoE_SetLocalEffectLoopEnabled"));
+  if (!get_version || !copy_snapshot || !request_shutdown || !teleport || !set_wax_loop ||
+      !set_effect_loop) {
     std::cerr << "Required export is missing\n";
     return 2;
   }
-  if (get_version(0) != 0x00020000) {
+  if (get_version(0) != 0x00030000) {
     std::cerr << "Unexpected DLL version\n";
     return 3;
   }
@@ -36,26 +41,33 @@ int main(int argument_count, char** arguments) {
     std::cerr << "Teleport unexpectedly succeeded without a player\n";
     return 4;
   }
+  if (set_effect_loop(1) != 0) {
+    std::cerr << "Local effect loop unexpectedly enabled on an unsupported host\n";
+    return 5;
+  }
+  set_wax_loop(0);
 
   const std::uint64_t required = copy_snapshot(nullptr, 0);
   if (required <= 1 || required > 1024 * 1024) {
     std::cerr << "Invalid JSON size: " << required << '\n';
-    return 5;
+    return 6;
   }
   std::vector<char> buffer(static_cast<std::size_t>(required));
   if (copy_snapshot(buffer.data(), buffer.size()) != required) {
     std::cerr << "JSON copy failed\n";
-    return 6;
+    return 7;
   }
 
   const std::string json(buffer.data());
   if (json.empty() || json.front() != '{' || json.back() != '}' ||
-      json.find("\"version\":\"0.2.0\"") == std::string::npos ||
+      json.find("\"version\":\"0.3.0\"") == std::string::npos ||
       json.find("\"transform\":{") == std::string::npos ||
       json.find("\"slots\":[") == std::string::npos ||
-      json.find("\"coordinateCandidates\":[") == std::string::npos) {
+      json.find("\"coordinateCandidates\":[") == std::string::npos ||
+      json.find("\"world\":{") == std::string::npos ||
+      json.find("\"localEffects\":{") == std::string::npos) {
     std::cerr << "JSON structure check failed\n";
-    return 7;
+    return 8;
   }
 
   std::cout << json << '\n';

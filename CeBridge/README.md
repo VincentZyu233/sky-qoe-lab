@@ -39,6 +39,10 @@ CeBridgeClient.exe file .\CeBridge\requests\sky_capture_manager.lua
 CeBridgeClient.exe file .\CeBridge\requests\sky_capture_status.lua
 CeBridgeClient.exe file .\CeBridge\requests\sky_read_outfit.lua
 CeBridgeClient.exe file .\CeBridge\requests\sky_menu_snapshot.lua
+CeBridgeClient.exe file .\CeBridge\requests\sky_menu_reload.lua
+CeBridgeClient.exe file .\CeBridge\requests\sky_menu_effect_smoke.lua
+CeBridgeClient.exe file .\CeBridge\requests\sky_menu_effect_cycle_once.lua
+CeBridgeClient.exe file .\CeBridge\requests\sky_menu_wax_smoke.lua
 ```
 
 `sky_menu_snapshot.lua` 是默认读取路径，它调用已注入菜单 DLL 的只读导出，不设置断点，并返回完整状态 JSON 喵。
@@ -48,6 +52,10 @@ CeBridgeClient.exe file .\CeBridge\requests\sky_menu_snapshot.lua
 `sky_capture_manager.lua` 仅保留为诊断工具，它最多命中 8 次并显式继续和自删；实机曾出现调试异常退出，因此日常流程不要使用它喵。
 
 `sky_read_outfit.lua` 返回一个 JSON 字符串，其中包含 Manager、Avatar、Outfit、数据库地址和全部 10 个槽位的 ID 与资源名喵。
+
+`sky_menu_reload.lua` 会调用已加载菜单的安全卸载导出，确认模块消失后注入新 DLL，并刷新符号校验 v0.3.0 版本喵。
+
+三个 smoke/cycle 请求使用菜单控制导出验证单个本地特效、完整 104 定义循环和单次烛火传送，结束时都会关闭相应开关喵。
 
 ## 已验证环境
 

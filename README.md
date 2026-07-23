@@ -214,12 +214,162 @@ uv run --with minidump python .\test\20260723\07_index_world_state_dump.py `
   .\captures\20260723-162258-rainforest-wax
 ```
 
+## v0.3.0 世界状态与自动功能
+
+`SkyQoEMenu.dll` v0.3.0 在 v0.2.0 的穿搭读取和六向位移基础上，加入世界状态、TGCL 关卡解析、烛火循环、本地特效循环和外部只读 HTTP API 喵。
+
+常驻左上 HUD 现在显示 Avatar、坐标、当前/最大房间人数、关卡对象与属性数、附近 Transform 数、Wax 数量以及两个循环开关状态喵。
+
+世界扫描不使用断点，每 100 ms 最多读取 8 MiB `MEM_PRIVATE` 内存；当前进程约扫描 2.5 GiB，一轮实测约 27 秒喵。
+
+扫描通过 `Sky.exe+0x1E1F070` vtable 识别 GameRoot，并从 `GameRoot+0x310` 取得 Manager 喵。
+
+2026-07-23 的实机样本中 GameRoot 为 `0xC032020`、Manager 为 `0x1392CA90`、Avatar 为 `0x1392CAC0`，这些绝对地址只对 PID `8224` 的当前运行期有效喵。
+
+房间当前人数只统计 `Avatar+0xB850 == 1`、`Avatar+0x58 -> Outfit` 且 `Outfit+0x08 == Avatar` 的有效槽位，不能把 60 个预分配槽位当在线人数喵。
+
+### TGCL 关卡格式
+
+雨林对象资源位于 `data/assets/rain/Data/Levels/RainForest/Objects.level.bin`，文件魔数为 `TGCL`、版本为 1 喵。
+
+已完整验证的雨林头部为 243 个 type/group、2968 个 symbol、9618 个 object、25929 个 property、44 个 source，声明文件大小为 1,262,892 字节喵。
+
+symbol records 从 `0xB90` 开始，string pool 从 `0xC510` 开始，object stream 从 `0x14A09` 开始喵。
+
+每条对象记录由 `uint32 groupIndex`、NUL 结尾对象名和按 group 字段顺序编码的 payload 组成喵。
+
+字段 `kind=0` 是固定长度值，`kind=1` 是 NUL 字符串，`kind=2` 是 4 字节对象引用，`kind=3` 是以 `uint32 count` 开头的数组喵。
+
+`kind=3` 的 `aux=-1` 表示每个数组元素为 4 字节引用，否则按 aux 指向的 group 递归解析喵。
+
+解析器最终游标必须精确等于文件末尾，否则视为格式或版本不匹配，不返回半解析结果喵。
+
+group 41、type ID `0x38CD` 是 Wax 拾取生成器，字段包含 `onWaxSpawned`、`waxPerSpawnMin/Max`、`spawnCountMin/Max`、`networkedPickups` 和 `autoCollectWax` 喵。
+
+雨林共解析到 32 个 Wax 生成器，其中 30 个坐标可用，2 个因 Y 小于 10 被保守标记为不可用喵。
+
+group 48、type ID `0x0955` 是粒子发射器，`emitterDef="Wax"` 只表示视觉发射器，不能当作真实烛火拾取目标喵。
+
+雨林 `maxPlayers` 原始候选为 `[0,8,4]`，当前实现取正值且不超过 Avatar 容量 60 的最大值 8 喵。
+
+### 循环传到烛火
+
+“循环传到烛火”默认关闭，使用当前关卡 TGCL 中的可用 Wax 生成器坐标，每次选择离玩家最近且本轮尚未访问的目标喵。
+
+传送目标 Y 增加 0.75 米，默认间隔 900 ms，一轮结束后等待 10 秒再开始下一轮喵。
+
+传送仍通过已验证的 Transform `+0x00` 与 `+0x10` 双写完成，任一写入失败会恢复原坐标喵。
+
+2026-07-23 实机烟雾测试从 `(33.2712,105.8034,-73.0892)` 移到 `(27.2734,105.3863,-74.6162)`，计数增加 1，随后自动关闭测试开关且 Sky 保持响应喵。
+
+当前版本遍历的是关卡静态 Wax 生成器，不是已经完成“只筛选此刻仍未拾取实体”的运行时实体差分，因此可能访问已清空或当前未激活的生成点喵。
+
+### 循环生成全特效
+
+静态字符串 `CreateEmitter` 只是反射注册名，不能直接当函数入口喵。
+
+当前构建中已确认的纯本地 Emitter 调用链如下喵。
+
+| RVA/偏移 | 暂定名称 | 已确认行为 |
+| --- | --- | --- |
+| `0x12317B0` | `EmitterBarn::CreateEmptyEmitter` | 只从对象池取空 Emitter，不产生可见效果喵 |
+| `0x1231FD0` | `EmitterBarn::CreateEmitterImmediate` | 参数为 Barn、位置、方向、`EmitterDef*`、bool，创建立即生效的本地 Emitter 喵 |
+| `0x1235910` | `Emitter::Setup` | 绑定位置、方向、定义、序号并初始化本地发射状态喵 |
+| `0x12320B0` | `EmitterBarn::Update` | 粒子系统游戏线程更新入口，仅有一个静态直接调用者喵 |
+| `0x1236640` | `Emitter::Release/Stop` | 标记停止并归还对象池喵 |
+| GameRoot `+0x628` | EmitterBarn | 当前实机值为 `0x157C8260`，对象大小超过 2.8 MiB 喵 |
+| EmitterBarn `+0x2BBA90` | free head | 空闲 Emitter 链表头喵 |
+| EmitterBarn `+0x2BBAB0` | immediate count | 即时 Emitter 活动计数，上限 3000 喵 |
+| EmitterBarn `+0x2BBAB4` | timed count | 延时 Emitter 活动计数，上限 512 喵 |
+| EmitterBarn `+0x2BBAB8` | sequence | Emitter 创建序号喵 |
+| EmitterBarn `+0x2DBD30` | extra count | 额外受限计数，上限 100 喵 |
+
+214 个 `CreateEmitterImmediate` 静态调用点中有 178 个可追溯到模块 RIP 相对全局槽位，去重得到 104 个 `EmitterDef*` 槽位喵。
+
+104 个槽位 RVA 固化在 `SkyQoEMenu/src/local_effects.cpp`，当前实机全部非空、互不重复且指向可读定义结构喵。
+
+特效任务不能从 Overlay 线程或 CE 远程线程直接修改 EmitterBarn 自由链表，因此 v0.3.0 用 MinHook 挂接 `EmitterBarn::Update`，先调用原函数，再在同一游戏线程最多消费一个定义喵。
+
+“循环生成全特效”默认关闭，默认间隔 35 ms，允许范围为 16–5000 ms，并在即时池达到 2800 时暂停、降到 2400 后恢复喵。
+
+该调用链没有 RPC、网络对象创建或服务器请求，只使用游戏已经加载的本地粒子定义喵。
+
+2026-07-23 单特效烟雾测试生成定义 `0x1097BBC0` 和 Emitter `0x15962580`，跳过 0 且 Sky 保持响应喵。
+
+完整循环实测在 35 ms 设置下 5.5 秒生成 117 个 Emitter，覆盖 1 个完整的 104 定义周期，跳过 0，池水位约从 1897 增至 2014/3000，工作集约 2394 MiB 且 Sky 全程响应喵。
+
+## 本机外部状态 API
+
+菜单成功注入并创建 Overlay 后，会启动只读 HTTP 服务 `http://127.0.0.1:27891`，只绑定 IPv4 loopback，不监听局域网地址喵。
+
+| 端点 | 内容 |
+| --- | --- |
+| `/health` | 服务版本、构建兼容性和玩家状态是否就绪喵 |
+| `/v1/state` | 完整玩家、穿搭、世界、烛火和本地特效快照喵 |
+| `/v1/player` | 玩家 Transform、Outfit 和 10 个穿搭槽位喵 |
+| `/v1/world` | 房间、关卡资源、附近 Transform、Wax 和特效状态喵 |
+| `/v1/schema` | 端点、单位和地址编码说明喵 |
+
+响应是 UTF-8 JSON，地址统一编码为十六进制字符串，响应带 `Cache-Control: no-store` 和本机调试用 CORS 头喵。
+
+HTTP 线程在 DLL 卸载前先关闭监听 socket 并 `join`，随后才移除 MinHook 和释放模块，不能把执行地址仍在 DLL 中的线程留给 `FreeLibrary` 喵。
+
+Harness 已验证五个端点可解析，并确认正常关闭后 `27891` 不再监听喵。
+
+`SkyQoE_CopySnapshotJson` 继续保留 v0.2.0 顶层字段，同时新增结构化 `player`、`world` 和 `localEffects` 节点，现有 CE Bridge 消费者无需立即迁移喵。
+
+## CE Bridge 新请求
+
+- `CeBridge/requests/sky_menu_reload.lua` 会请求旧菜单安全卸载、等待模块消失、注入新 DLL、刷新符号并验证版本导出喵。
+- `CeBridge/requests/sky_menu_effect_smoke.lua` 以 5000 ms 间隔生成一个本地特效后关闭喵。
+- `CeBridge/requests/sky_menu_effect_cycle_once.lua` 以 35 ms 间隔运行约 5.5 秒后关闭，用于一次完整目录回归喵。
+- `CeBridge/requests/sky_menu_wax_smoke.lua` 以 10 秒间隔只允许一次烛火传送后关闭喵。
+
+控制导出 `SkyQoE_SetWaxLoopEnabled`、`SkyQoE_SetWaxLoopInterval`、`SkyQoE_SetLocalEffectLoopEnabled` 和 `SkyQoE_SetLocalEffectInterval` 只修改 DLL 内调度状态，HTTP API 仍保持只读喵。
+
+## 工具与用途
+
+| 工具 | 本项目中的用途 |
+| --- | --- |
+| Cheat Engine 7.7 + CE Bridge | 进程选择、DLL 注入、导出调用、模块枚举和无人工复制的运行时验证喵 |
+| `rg` | 对 50 MiB 映像和源码做快速字符串、RVA 与文件检索喵 |
+| Node.js | 检查二进制邻域、PE 常量、JSON 结构和小型静态数据处理喵 |
+| `uv` + Python `capstone` | 解析 PE 节、`.pdata` 函数边界、RIP 相对引用、直接 call xref 和寄存器来源喵 |
+| CMake + Ninja + MinGW GCC 15.2 | 构建 DLL、Harness、API 测试、转储工具和 TGCL 回归工具喵 |
+| MinHook 1.3.4 | 安全重定位并挂接 x64 `EmitterBarn::Update` 前导指令喵 |
+| Dear ImGui + D3D11 | 独立透明菜单窗口，不 Hook Sky 的 Vulkan swapchain 喵 |
+| `MiniDumpWriteDump` + `minidump` Python 包 | 捕获和索引完整用户态内存喵 |
+| PowerShell `Invoke-RestMethod` | 验证五个本机 HTTP 端点及关闭后的端口释放喵 |
+| Pillow `ImageGrab` | 捕获 Harness/Overlay 桌面截图做布局检查喵 |
+| Git + GitHub SSH remote | 保存源码、研究结论与可复现请求脚本喵 |
+
+离线分析临时脚本统一放在 `E:\tmp\codex`，包括字符串 xref、函数反汇编、call xref、EmitterDef 槽位数据流和运行时只读检查脚本喵。
+
+## 已踩坑与禁止重复路径
+
+1. 在 `0x141696910` 设置普通执行断点会高频命中并持续暂停游戏，连续点运行只会再次命中；必须先 toggle/删除断点再继续喵。
+2. 旧捕获脚本把 `flags&8` 判定方向写反，导致连续命中 256 次后 Sky 以异常 `0x4001000A` 退出；有效本地 Avatar 要求该位为 1 喵。
+3. `DissectCode:dissect()` 与 `createRipRelativeScanner()` 会长时间占用 CE/Bridge 主线程，曾导致 Sky 卡死或退出，日常流程禁止使用喵。
+4. `CreateEmitter`、`CreateLevelEmitterParam`、`spawnParticle` 等字符串多为反射或字段注册名，字符串地址不是可调用函数入口喵。
+5. `0x12317B0` 只创建空白 Emitter，必须传入已加载 `EmitterDef*` 并走 `0x1231FD0 -> 0x1235910` 才有可见效果喵。
+6. EmitterBarn 自由链表没有为 Overlay/CE 远程线程暴露同步保证，不能从这些线程直接调用创建函数，必须在 `EmitterBarn::Update` 游戏线程消费任务喵。
+7. 私有内存包含历史 `cur_level` telemetry；首个字符串曾误选 `CandleSpace`，必须完成整轮扫描后按加权共识选择 `RainForest` 喵。
+8. 注入环境下 MinGW `std::filesystem` 域目录发现曾返回 `level asset not found`，当前保留 Win32 `FindFirstFileW/GetFileAttributesW` 兜底，且失败结果不能永久缓存喵。
+9. Sky 映射中的 DLL 会锁住其构建输出，链接同一路径会报 `cannot open output file SkyQoEMenu.dll: Permission denied`；开发热重载必须使用新的 build 目录，再卸载旧模块喵。
+10. CE 在同名 DLL 热重载后可能保留旧符号地址，调用任何导出前必须 `reinitializeSymbolhandler(true)` 并重新取地址喵。
+11. 隐藏 Harness 不满足 Overlay 的 `IsWindowVisible` 判定，HTTP 不会启动；UI/HTTP 集成测试必须临时显示 Harness，再通过正常 `WM_CLOSE` 退出喵。
+12. HTTP 或 Hook 线程若在 `FreeLibrary` 后仍执行会跳入已卸载代码；卸载顺序必须是停止 HTTP 并 join、禁用/移除 Hook、清理 ImGui、最后 `FreeLibraryAndExitThread` 喵。
+13. 系统 `comsvcs.dll, MiniDump` 曾返回成功却没有生成文件，转储成功必须检查文件存在与大小；当前使用自己的 `SkyProcessDump` 喵。
+14. 房间容量 60 是 Avatar 固定池容量，不是服务器房间上限；最大人数应来自当前 TGCL 的 `maxPlayers` 候选喵。
+15. Wax 粒子发射器不是 Wax 拾取生成器，不能仅凭名称含 `Wax` 就加入传送目标喵。
+16. PowerShell 把 .NET 客户端输出管道给 Node.js 时可能在开头加入 UTF-8 BOM，严格 `JSON.parse` 前要先移除 `U+FEFF`；这不是 CE Bridge 返回了非法 JSON 喵。
+
 ## 项目目录
 
 - `SkyOutfitReader/` 是只读外部穿搭读取器原型喵。
 - `CeBridge/` 是供终端直接控制当前 Cheat Engine 实例的本机命名管道桥喵。
-- `CeBridge/requests/` 固化了玩家管理器捕获、捕获状态查询与穿搭 JSON 读取逻辑喵。
-- `SkyQoEMenu/` 是透明 D3D11 ImGui 内置菜单与只读玩家状态快照实现喵。
+- `CeBridge/requests/` 固化了玩家管理器、快照、热重载和自动功能烟雾测试逻辑喵。
+- `SkyQoEMenu/` 是透明 D3D11 ImGui 菜单、世界解析、自动功能和本机状态 API 实现喵。
 - `test/20260723/` 保存好友码、HAR、协议字符串、指针反查和崩溃转储结构检查脚本喵。
 - `docs/plan/20260723.尝试复现一个测身高接口捏/20260723.好友码与远端穿搭协议初步还原.md` 记录好友码测身高接口的当前逆向结论喵。
 - `Sky_dump.bin` 与 `Sky_full_dump.bin` 是当前版本的分析输入，不应被自动修改喵。
