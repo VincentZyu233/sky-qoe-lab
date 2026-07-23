@@ -252,6 +252,86 @@ group 48、type ID `0x0955` 是粒子发射器，`emitterDef="Wax"` 只表示视
 
 雨林 `maxPlayers` 原始候选为 `[0,8,4]`，当前实现取正值且不超过 Avatar 容量 60 的最大值 8 喵。
 
+### 烛火内部 ID 与命名空间
+
+Sky 内部没有一个可以代表所有“烛火”的单一 ID，至少要区分关卡生成器、运行时拾取块、拾取行为、视觉特效和网络 RPC 五层命名喵。
+
+| 层次 | 已确认 ID/内部命名 | 含义 |
+| --- | --- | --- |
+| TGCL 静态生成器 | group/type index `41`、type ID `0x38CD` | 当前“循环传到烛火”使用的关卡对象类型喵 |
+| TGCL 实例名 | `BstNode_<数字>` | 每个生成器在 object stream 中的内部节点名，数字后缀不是已证明可跨版本使用的全局 Wax ID 喵 |
+| TGCL 视觉发射器 | group/type index `48`、type ID `0x0955`、`emitterDef="Wax"` | 只负责 Wax 外观的粒子定义，不表示可拾取实体喵 |
+| 运行时拾取对象 | `WaxChunk`、`WaxChunkType`、`WaxChunkMode`、`WaxChunkForce` | 玩家实际吸收的运行时 Wax 块及其模式/受力类型喵 |
+| 运行时对象池 | `WaxChunkBarn`、模块字符串 RVA `0x1F0FA42` | WaxChunk 的本地对象池/管理器命名锚点喵 |
+| 生成区域 | `WaxPickupSpawnerZone`、`WaxPickupSpawnerZoneType` | 决定 WaxChunk 生成位置与分布方式的区域对象喵 |
+| 拾取行为 | `WaxPickupBehavior`、`OnWaxPickup` | 控制飞行、下落、自动吸取等拾取表现和拾取事件喵 |
+| 视觉反馈 | `WaxPickupEffect`、模块字符串 RVA `0x1EEC51D` | 拾取时的本地视觉效果，不是奖励或实体本身喵 |
+| 本地生成入口命名 | `SpawnWaxChunk`、模块字符串 RVA `0x1F21EB2` | 运行时生成路径的命名锚点，尚未标记为可直接调用函数地址喵 |
+| 网络入口命名 | `CreateWaxChunkRpc`、`ActivateWaxChunkRpc`、`PopWaxChunkRpc` | 网络同步路径，本模组的传送和本地特效功能均不调用这些 RPC 喵 |
+
+当前模块映像中的关键命名字符串 RVA 如下，这些 RVA 只用于静态 xref 和运行时对象命名识别，不是函数入口喵。
+
+| 字符串 | RVA |
+| --- | ---: |
+| `WaxPickupEffect` | `0x1EEC51D` 喵 |
+| `WaxPickupBehavior` | `0x1EFE3FB` 喵 |
+| `OnWaxPickup` | `0x1F067C2` 喵 |
+| `WaxChunkBarn` | `0x1F0FA42` 喵 |
+| `SpawnWaxChunk` | `0x1F21EB2` 喵 |
+| `WaxPickupSpawnerZone` | `0x1F36BA1` 喵 |
+| `PopWaxChunkRpc` | `0x1F57D36` 喵 |
+| `ActivateWaxChunkRpc` | `0x1F57D45` 喵 |
+| `CreateWaxChunkRpc` | `0x1F57D59` 喵 |
+| `WaxChunk` | `0x1FBD776` 喵 |
+| `WaxChunkType` | `0x1FBDBD8` 喵 |
+
+已观察到的 Wax 行为枚举命名包括 `kWaxPickupBehavior_Idle`、`Fall`、`Flutter`、`Fly`、`FlyBig` 和 `AutoCollect` 喵。
+
+已观察到的 WaxChunk 模式/受力命名包括 `kWaxChunkMode_Default`、`NoPhysics`、`Firework`、`kWaxChunkForceType_Sticky` 和 `Push` 喵。
+
+已观察到的生成区类型包括 `kWaxPickupSpawnerZoneType_Point`、`RandomHugGround`、`RandomFloating`、`RandomPickupModelsHugGround` 和 `CodeTriggeredRandomFloating` 喵。
+
+TGCL `0x38CD` 生成器的关键属性命名包括 `onWaxSpawned`、`onWaxSpawnEvents`、`waxPerSpawnMin`、`waxPerSpawnMax`、`spawnCountMin`、`spawnCountMax`、`networkedPickups`、`alwaysSpawn`、`autoCollectWax` 和 `collectAllWaxMarker` 喵。
+
+雨林 32 个 `0x38CD` 生成器实例如下，`objectIndex` 是 `Objects.level.bin` object stream 的 0 基索引喵。
+
+| objectIndex | 内部节点名 | networked | 当前可用 |
+| ---: | --- | :---: | :---: |
+| 131 | `BstNode_2819097369` | 是 | 是 |
+| 438 | `BstNode_2819097385` | 是 | 是 |
+| 861 | `BstNode_384297116` | 否 | 是 |
+| 980 | `BstNode_1969918824` | 否 | 是 |
+| 1025 | `BstNode_2819097473` | 是 | 是 |
+| 1182 | `BstNode_193349828` | 否 | 是 |
+| 1844 | `BstNode_2819097361` | 是 | 否 |
+| 2142 | `BstNode_2819097434` | 是 | 是 |
+| 2777 | `BstNode_2819097307` | 是 | 是 |
+| 2869 | `BstNode_2819097409` | 是 | 是 |
+| 2921 | `BstNode_846507825` | 否 | 是 |
+| 3483 | `BstNode_2819097393` | 是 | 是 |
+| 3625 | `BstNode_1218004489` | 否 | 是 |
+| 3630 | `BstNode_1712706270` | 否 | 是 |
+| 3674 | `BstNode_2819097411` | 是 | 是 |
+| 3953 | `BstNode_2097292855` | 否 | 是 |
+| 4509 | `BstNode_228557002` | 否 | 是 |
+| 4586 | `BstNode_2819097424` | 是 | 是 |
+| 4976 | `BstNode_2819097432` | 是 | 是 |
+| 5089 | `BstNode_1788600371` | 否 | 是 |
+| 5115 | `BstNode_2819097347` | 是 | 否 |
+| 5140 | `BstNode_2819097401` | 是 | 是 |
+| 5796 | `BstNode_345153891` | 否 | 是 |
+| 6033 | `BstNode_2819097594` | 是 | 是 |
+| 6343 | `BstNode_2819097453` | 是 | 是 |
+| 6517 | `BstNode_2819097446` | 是 | 是 |
+| 6703 | `BstNode_2819097420` | 是 | 是 |
+| 7003 | `BstNode_2819097332` | 是 | 是 |
+| 7248 | `BstNode_432704889` | 否 | 是 |
+| 7326 | `BstNode_676948304` | 否 | 是 |
+| 7444 | `BstNode_2819097377` | 是 | 是 |
+| 7767 | `BstNode_2819097349` | 是 | 是 |
+
+其中 objectIndex `1844` 与 `5115` 因解析坐标 Y 小于 10 被当前安全规则排除，所以循环实际使用其余 30 个实例喵。
+
 ### 循环传到烛火
 
 “循环传到烛火”默认关闭，使用当前关卡 TGCL 中的可用 Wax 生成器坐标，每次选择离玩家最近且本轮尚未访问的目标喵。
