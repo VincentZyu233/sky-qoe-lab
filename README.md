@@ -423,6 +423,22 @@ Harness 已验证五个端点可解析，并确认正常关闭后 `27891` 不再
 | Pillow `ImageGrab` | 捕获 Harness/Overlay 桌面截图做布局检查喵 |
 | Git + GitHub SSH remote | 保存源码、研究结论与可复现请求脚本喵 |
 
+### Release 资产
+
+GitHub Release [`tools-20260723`](https://github.com/VincentZyu233/sky-qoe-lab/releases/tag/tools-20260723) 标题为“用到的工具”，保存当前源码对应的 Windows x64 可执行产物喵。
+
+| 资产 | 内容 |
+| --- | --- |
+| `SkyQoEMenu.dll` | 可直接由 CE Bridge 注入的 v0.3.0 菜单 DLL 喵 |
+| `SkyQoE-native-tools-win-x64.zip` | 菜单 DLL、Harness、API 测试、完整内存转储工具和 TGCL 关卡检查器喵 |
+| `CeBridge-win-x64.zip` | 自包含 CE Bridge 客户端、CE autorun 脚本、请求脚本和使用说明喵 |
+| `SkyOutfitReader-win-x64.zip` | 自包含的只读外部穿搭读取器原型，版本敏感，日常读取优先使用菜单 API 喵 |
+| `SHA256SUMS.txt` | 上述四个资产的 SHA-256 校验值喵 |
+
+Release 不包含 `Sky.exe`、`Sky_dump.bin`、`Sky_full_dump.bin`、完整进程转储、关卡资源、Cheat Engine 安装包或 GCC/SDK 缓存喵。
+
+CE Bridge 与穿搭读取器使用 .NET 9 `win-x64` 自包含单文件发布，不要求目标机器预装 .NET 运行时喵。
+
 离线分析临时脚本统一放在 `E:\tmp\codex`，包括字符串 xref、函数反汇编、call xref、EmitterDef 槽位数据流和运行时只读检查脚本喵。
 
 ## 已踩坑与禁止重复路径
