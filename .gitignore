@@ -2,12 +2,21 @@
 *.bin
 *.dmp
 *.dump
+*.i64
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+docs/*dump.txt
 
 # .NET build output
 **/bin/
 **/obj/
 artifacts/
 dist/
+.tools/
+.build/
 
 # IDE files
 .vs/
@@ -24,6 +33,8 @@ dist/
 *.bak
 *.swp
 *~
+.venv/
+**/.venv/
 
 # OS metadata
 Thumbs.db

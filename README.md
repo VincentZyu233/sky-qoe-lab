@@ -35,7 +35,7 @@
 | Manager | `+0xB880 + index*0x10B20` | 第 `index` 个 Avatar 活动字节喵 |
 | Avatar | `+0x58` | outfit 对象指针喵 |
 | Avatar | `+0xB850` | 活动字节喵 |
-| Avatar | `+0x109EC` | 状态标志，`0x08` 位会让 `GetLocalAvatar(..., true)` 拒绝该 Avatar，运行时已观察到 flags=`0x1AC` 的非本地候选喵 |
+| Avatar | `+0x109EC` | 状态标志，`GetLocalAvatar(..., true)` 只接受 `0x08` 位为 1 的 Avatar；`flags=0x1AC` 是有效候选喵 |
 | Outfit | `+0x08` | Avatar 反向指针，此关系由 `GetEffectiveOutfitId` 明确使用喵 |
 | Outfit | `+0x10` | 穿搭资源数据库指针喵 |
 | Outfit | `+0x44` | 控制回退穿搭选择的状态字段喵 |
@@ -50,16 +50,16 @@
 
 | 槽位 | 名称 |
 | --- | --- |
-| `0` | `Horn` 喵 |
-| `1` | `Hair` 喵 |
-| `2` | `Mask` 喵 |
-| `3` | `Neck` 喵 |
-| `4` | `Wing` 喵 |
-| `5` | `Body` 喵 |
-| `6` | `Feet` 喵 |
-| `7` | `Prop` 喵 |
-| `8` | `Hat` 喵 |
-| `9` | `Face` 喵 |
+| `0` | `Body` 喵 |
+| `1` | `Wing` 喵 |
+| `2` | `Hair` 喵 |
+| `3` | `Mask` 喵 |
+| `4` | `Neck` 喵 |
+| `5` | `Feet` 喵 |
+| `6` | `Horn` 喵 |
+| `7` | `Face` 喵 |
+| `8` | `Prop` 喵 |
+| `9` | `Hat` 喵 |
 
 ## 穿搭数据库布局
 
@@ -78,12 +78,14 @@ ID 哈希使用 MurmurHash3 finalizer 形式：依次执行 `x ^= x>>16`、乘 `
 ## 当前验证状态
 
 - 静态反汇编、槽位枚举和数据库算法已经完成喵。
-- 全地址空间盲扫会产生大量偶然结构匹配，因此不再作为稳定入口喵。
+- 菜单使用 `Avatar+0x58 == Outfit`、`Outfit+0x08 == Avatar`、active、`flags&8` 与数据库指针联合校验，并以每次 8 MiB 的预算分片扫描可读私有内存喵。
 - CE Bridge 已安装到 `C:\Program Files\Cheat Engine\autorun\codex_bridge.lua`，并已连接当前 CE 7.7 实例喵。
 - CE Bridge 已验证正常返回、`print` 捕获、Lua 错误堆栈、语法错误和连续多次连接喵。
 - CE 7.7 的断点唯一句柄是 `debug_setBreakpoint` 返回的完整信息表，只有将该表交给 `debug_removeBreakpointByID` 才能精确删除喵。
-- `GetLocalAvatar` 捕获器会显式继续每一次断点，只跳过仅含 `flags&8!=0` Avatar 的 Manager，找到有效本地 Avatar 后按唯一 ID 自删，连续 256 次未匹配也会自动撤销喵。
-- 下一步由外部读取器使用动态玩家管理器验证完整穿搭 JSON 喵。
+- `2026-07-23 15:25` 的实机验证确认旧判定把 `flags&8` 方向写反，导致捕获器连续命中 256 次后以异常码 `0x4001000A` 退出；默认流程不再依赖调试断点喵。
+- `SkyQoEMenu.dll` v0.1.1 提供完整快照 JSON 导出，CE Bridge 可用 `sky_menu_snapshot.lua` 读取 Avatar、Outfit、数据库、10 个槽位和坐标候选喵。
+- v0.1.1 实机自动发现会额外要求 active=`1`、Outfit 不在 Avatar 内嵌范围、数据库不在 Outfit 内嵌范围、哈希表头可读且至少一个有效 ID 能解析到资源名，以排除偶然双向指针伪结构喵。
+- v0.1.1 已连续三次稳定读取同一对象链，10/10 槽位均解析出与 `Body, Wing, Hair, Mask, Neck, Feet, Horn, Face, Prop, Hat` 对应的资源名，运行时地址只作当次验证样本而不能硬编码喵。
 - 所有 RVA 都属于当前 `0x6A582C8E` 构建，后续版本必须先校验 AOB 或重新定位喵。
 
 ## 项目目录
@@ -91,4 +93,7 @@ ID 哈希使用 MurmurHash3 finalizer 形式：依次执行 `x ^= x>>16`、乘 `
 - `SkyOutfitReader/` 是只读外部穿搭读取器原型喵。
 - `CeBridge/` 是供终端直接控制当前 Cheat Engine 实例的本机命名管道桥喵。
 - `CeBridge/requests/` 固化了玩家管理器捕获、捕获状态查询与穿搭 JSON 读取逻辑喵。
+- `SkyQoEMenu/` 是透明 D3D11 ImGui 内置菜单与只读玩家状态快照实现喵。
+- `test/20260723/` 保存好友码、HAR、协议字符串、指针反查和崩溃转储结构检查脚本喵。
+- `docs/plan/20260723.尝试复现一个测身高接口捏/20260723.好友码与远端穿搭协议初步还原.md` 记录好友码测身高接口的当前逆向结论喵。
 - `Sky_dump.bin` 与 `Sky_full_dump.bin` 是当前版本的分析输入，不应被自动修改喵。

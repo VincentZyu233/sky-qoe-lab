@@ -1,14 +1,14 @@
 local slotNames = {
-  'Horn',
+  'Body',
+  'Wing',
   'Hair',
   'Mask',
   'Neck',
-  'Wing',
-  'Body',
   'Feet',
+  'Horn',
+  'Face',
   'Prop',
   'Hat',
-  'Face',
 }
 
 local function unsigned32(value)
@@ -96,7 +96,7 @@ for index = 0, 59 do
   local candidate = manager + 0x30 + index * 0x10B20
   local active = readBytes(candidate + 0xB850, 1, false)
   local flags = readSmallInteger(candidate + 0x109EC)
-  if active and active ~= 0 and flags and (flags & 0x08) == 0 then
+  if active and active ~= 0 and flags and (flags & 0x08) ~= 0 then
     local outfit = readQword(candidate + 0x58)
     if outfit and outfit ~= 0 and readQword(outfit + 8) == candidate then
       avatar = candidate

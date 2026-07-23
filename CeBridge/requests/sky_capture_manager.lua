@@ -1,5 +1,5 @@
 local target = getAddress('Sky.exe+1696910')
-local MAX_HITS = 256
+local MAX_HITS = 8
 
 if CodexSkyCapture and CodexSkyCapture.armed then
   return true, CodexSkyCapture.breakpointId, string.format('0x%X', target), 'already armed'
@@ -25,7 +25,7 @@ local function findLocalAvatar(manager)
     local active = readBytes(avatar + 0xB850, 1, false)
     local flags = readSmallInteger(avatar + 0x109EC)
 
-    if active and active ~= 0 and flags and (flags & 0x08) == 0 then
+    if active and active ~= 0 and flags and (flags & 0x08) ~= 0 then
       local outfit = readQword(avatar + 0x58)
       if outfit and outfit ~= 0 and readQword(outfit + 8) == avatar then
         return avatar, outfit, index, flags

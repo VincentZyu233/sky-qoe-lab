@@ -6,7 +6,7 @@
 
 - `autorun/codex_bridge.lua` 由 CE 启动时自动加载，并在后台线程监听管道喵。
 - `client/` 是发送 Lua 并打印 JSON 响应的 .NET 9 命令行客户端喵。
-- `requests/` 保存 Sky 玩家管理器捕获、状态查询和完整穿搭读取脚本喵。
+- `requests/` 保存 Sky 菜单快照、玩家管理器捕获、状态查询和完整穿搭读取脚本喵。
 - Lua 请求通过 `thread.synchronize` 在 CE 主线程执行，因此可以安全调用 GUI、扫描器、调试器和进程相关 API 喵。
 
 ## 协议
@@ -38,9 +38,12 @@ CeBridgeClient.exe --timeout 60000 file .\long-scan.lua
 CeBridgeClient.exe file .\CeBridge\requests\sky_capture_manager.lua
 CeBridgeClient.exe file .\CeBridge\requests\sky_capture_status.lua
 CeBridgeClient.exe file .\CeBridge\requests\sky_read_outfit.lua
+CeBridgeClient.exe file .\CeBridge\requests\sky_menu_snapshot.lua
 ```
 
-`sky_capture_manager.lua` 使用带专属回调的执行断点，每次回调都会显式调用 `debug_continueFromBreakpoint(co_run)`；找到有效本地 Avatar 后会按唯一 ID 自行删除，连续 256 次未匹配也会自动撤销以避免拖慢游戏喵。
+`sky_menu_snapshot.lua` 是默认读取路径，它调用已注入菜单 DLL 的只读导出，不设置断点，并返回完整状态 JSON 喵。
+
+`sky_capture_manager.lua` 仅保留为诊断工具，它最多命中 8 次并显式继续和自删；实机曾出现调试异常退出，因此日常流程不要使用它喵。
 
 `sky_read_outfit.lua` 返回一个 JSON 字符串，其中包含 Manager、Avatar、Outfit、数据库地址和全部 10 个槽位的 ID 与资源名喵。
 
