@@ -78,3 +78,10 @@ target_compile_definitions(SkyQoEMenuApiTest PRIVATE UNICODE _UNICODE WIN32_LEAN
 if(MINGW)
   target_link_options(SkyQoEMenuApiTest PRIVATE -static-libgcc -static-libstdc++)
 endif()
+
+add_executable(SkyProcessDump tools/process_dump.cpp)
+target_compile_definitions(SkyProcessDump PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
+if(MINGW)
+  target_link_options(SkyProcessDump PRIVATE -municode -static-libgcc -static-libstdc++)
+endif()
+target_link_libraries(SkyProcessDump PRIVATE dbghelp)

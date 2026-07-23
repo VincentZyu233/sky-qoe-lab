@@ -9,6 +9,7 @@
 *.nam
 *.til
 docs/*dump.txt
+captures/
 
 # .NET build output
 **/bin/

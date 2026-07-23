@@ -1,6 +1,6 @@
 # Sky QoE Mod Research
 
-这是 Sky 非正式 QoE 模组的持续研究工作区，当前目标是让本机外部程序稳定读取当前玩家自身的完整穿搭信息喵。
+这是 Sky 非正式 QoE 模组的持续研究工作区，当前目标包括稳定读取本地玩家状态、提供内置调试菜单，并逐步识别场景实体与 QoE 功能入口喵。
 
 ## 当前环境
 
@@ -94,6 +94,125 @@ ID 哈希使用 MurmurHash3 finalizer 形式：依次执行 `x ^= x>>16`、乘 `
 - v0.2.0 已在实机完成前后、左右、上下各 5 厘米成对测试，六次调用全部成功，平面与垂直坐标变化正确且最终精确回到起点喵。
 - 同名 DLL 热卸载重载后必须完整刷新 CE 符号处理器再调用导出；`sky_menu_snapshot.lua` 已内置该刷新，避免旧地址导致目标进程异常退出喵。
 - 所有 RVA 都属于当前 `0x6A582C8E` 构建，后续版本必须先校验 AOB 或重新定位喵。
+
+## CE Bridge 自主操作流程
+
+CE Bridge 让工作区终端直接控制已经打开的 Cheat Engine，不再需要手工复制 Lua 到 CE Lua Engine 喵。
+
+- CE 自启动脚本源码位于 `CeBridge/autorun/codex_bridge.lua`，安装副本位于 `C:\Program Files\Cheat Engine\autorun\codex_bridge.lua` 喵。
+- Bridge 只监听本机命名管道 `\\.\pipe\codex_ce_bridge_v1`，不开放 TCP 端口；按私人本机插件的需求，不使用令牌或加密喵。
+- `.NET 9` 客户端位于 `CeBridge/client/`，请求格式是 4 字节 little-endian 长度加 UTF-8 Lua，响应格式是同样长度前缀的 JSON 喵。
+- Bridge 后台线程接收请求，再通过 `thread.synchronize` 在 CE 主线程执行 Lua，因此可调用 CE 的进程、符号、GUI 与扫描 API 喵。
+- `CeBridge/requests/sky_menu_snapshot.lua` 会完整刷新 CE 符号处理器，调用 `SkyQoE_CopySnapshotJson`，并返回玩家、变换、穿搭和坐标候选 JSON 喵。
+- Bridge 源码、客户端和请求脚本可以提交到远端仓库；`C:\Program Files` 下的安装副本、构建产物和本地捕获不进入仓库喵。
+
+每次 Sky 重启后必须重新取得 PID 并执行 `openProcess(newPid)`，不能继续使用 CE 中显示的旧 PID 喵。
+
+目标进程切换后先验证 `getAddress('Sky.exe') == 0x140000000`，再做一次可立即释放的 4 KiB `allocateMemory` 测试，确认句柄可写喵。
+
+完成验证后才调用 `injectDLL` 注入 `.build/SkyQoEMenu/SkyQoEMenu.dll`，并用 Windows 模块列表、Overlay HWND、版本导出和快照 JSON 四项共同确认成功喵。
+
+当前机器的 Scoop `.NET` 环境变量会错误指向不完整的 SDK，运行 Bridge 客户端时应显式使用系统 `.NET 9` 喵：
+
+```powershell
+$env:DOTNET_ROOT='C:\Program Files\dotnet'
+& 'C:\Program Files\dotnet\dotnet.exe' `
+  '.\CeBridge\client\bin\Release\net9.0-windows\CeBridgeClient.dll' ping
+```
+
+构建客户端时还需要清除错误的 `MSBuildSDKsPath`，再调用 `C:\Program Files\dotnet\dotnet.exe build` 喵。
+
+默认工作流不使用调试断点，也不使用 CE 的完整模块 `DissectCode:dissect()` 或 `createRipRelativeScanner()`，因为前者曾导致游戏异常退出，后两者会长时间占用 Bridge 主线程喵。
+
+## 雨林烛火状态捕获
+
+`2026-07-23 16:22` 在雨林地图、附近烛火刻意保持未拾取时完成了状态捕获喵。
+
+本地捕获目录是 `captures/20260723-162258-rainforest-wax/`，该目录已加入 `.gitignore`，因为完整内存可能包含会话状态，不应上传 GitHub 喵。
+
+### 捕获内容
+
+| 文件 | 内容 |
+| --- | --- |
+| `Sky-8224-full.dmp` | 完整用户态内存、内存区域、线程、句柄和卸载模块信息，文件大小 `3,375,341,880` 字节喵 |
+| `capture-manifest.json` | 捕获上下文、时间、构建、玩家锚点、文件大小与哈希清单喵 |
+| `menu-snapshot*.json` | 完整转储前后的菜单 JSON 快照喵 |
+| `modules.json` | 当时的 131 个已加载模块喵 |
+| `threads.json` | 当时的 75 个线程及状态喵 |
+| `memory-regions.json` | 3835 个虚拟内存区域的基址、大小、保护、状态和类型喵 |
+| `dump-summary.json` | 捕获段、扫描字节、关键词计数和未捕获小页摘要喵 |
+| `world-string-index.json` | 动态私有内存中的 18058 条世界相关字符串及虚拟地址喵 |
+| `world-elements-curated.json` | 精简后的 296 条场景、烛火运行时、行为与可收集物候选喵 |
+| `anchors/` | Avatar、Transform、Outfit 与穿搭数据库头的定向原始内存喵 |
+
+完整转储头是 `MDMP`，SHA-256 是 `33100F8D47F45D2ABD3761CE46233C1CE419F02105D6A4A33CAB3D328765DE99` 喵。
+
+转储实际包含 `2394` 个内存段和 `3,374,788,608` 字节数据，其中动态私有内存扫描覆盖 `2,633,940,992` 字节喵。
+
+199 个合计约 1.43 MiB 的已提交小页没有出现在 Memory64 数据流中，已记录在 `dump-summary.json`，不影响完整转储主体喵。
+
+### 玩家锚点
+
+以下地址只属于本次 PID `8224` 捕获，不能跨进程硬编码喵：
+
+| 对象 | 捕获地址 |
+| --- | ---: |
+| Avatar | `0x1392CAC0` 喵 |
+| Transform | `0x111E2770` 喵 |
+| Outfit | `0x111EACC0` 喵 |
+| Outfit database | `0x13055DA0` 喵 |
+
+转储前位置为 `(32.6669, 105.6510, -74.04535)`，转储后为 `(32.69534, 105.6516, -74.03335)`，对象地址保持不变喵。
+
+### 世界元素线索
+
+私有内存字符串 `Levels/RainForest/Candles.level` 位于本次捕获地址 `0xAB92660`，可作为当前雨林烛火关卡的场景线索喵。
+
+本次捕获还出现了以下高价值名称喵：
+
+| 捕获地址 | 字符串 |
+| ---: | --- |
+| `0x5CDD80` | `Create WaxChunk` 喵 |
+| `0x5CDF70` | `Pop wax chunk (remote) 1982950791` 喵 |
+| `0x9C8C760` | `OnWaxPickup` 喵 |
+| `0x9C8C8B0` | `WaxChunk` 喵 |
+| `0x9CA7310` | `CreateWaxChunkRpc` 喵 |
+| `0x9CA7450` | `WaxPickupBehavior` 喵 |
+| `0x9CA7B90` | `ActivateWaxChunkRpc` 喵 |
+| `0x9CA8CD0` | `WaxPickupSpawnerZone` 喵 |
+| `0xBDA65B0` | `onWaxSpawnEvents` 喵 |
+| `0xBD21100` | `SpawnWaxChunk` 喵 |
+| `0xBF1CB50` | `autoCollectWax` 喵 |
+| `0xBF4FF50` | `collectAllWaxMarker` 喵 |
+
+这些地址是捕获中字符串实例的地址，不是已经确认的函数入口或实体对象地址喵。
+
+后续应从这些字符串做静态 xref，并在转储中查找引用字符串或对应类型描述符的私有对象；再将候选对象坐标与玩家位置、拾取前后差分进行交叉验证喵。
+
+### 捕获方法
+
+第一步通过 CE Bridge 调用 `sky_menu_snapshot.lua` 固化玩家、Transform、Outfit 和穿搭数据库锚点，全程不使用断点喵。
+
+系统 `comsvcs.dll, MiniDump` 入口虽然返回成功码但没有产生文件，因此不能把其退出码当作捕获成功依据喵。
+
+随后新增 `SkyProcessDump`，直接调用 Windows `MiniDumpWriteDump`，并启用完整内存、完整内存信息、句柄、线程、进程线程数据、卸载模块和令牌信息喵。
+
+```powershell
+.\.build\SkyQoEMenu\SkyProcessDump.exe 8224 `
+  '.\captures\20260723-162258-rainforest-wax\Sky-8224-full.dmp'
+```
+
+`07_index_world_state_dump.py` 使用 MemoryInfoList 选择 `MEM_COMMIT + MEM_PRIVATE` 区域，以 8 MiB 分块扫描 ASCII 与 UTF-16 关键词字符串喵。
+
+`08_curate_world_state_index.py` 从通用索引筛选场景路径、WaxChunk、WaxPickup、生成、拾取与自动收集相关名称喵。
+
+`09_extract_state_anchors.py` 根据菜单快照，从完整转储直接提取四块稳定锚点内存并生成 SHA-256 清单喵。
+
+```powershell
+uv run --with minidump python .\test\20260723\07_index_world_state_dump.py `
+  .\captures\20260723-162258-rainforest-wax\Sky-8224-full.dmp `
+  .\captures\20260723-162258-rainforest-wax
+```
 
 ## 项目目录
 
