@@ -6,6 +6,18 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(MINGW)
+  get_filename_component(SKYQOE_MINGW_BIN_DIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+  find_program(
+    SKYQOE_WINDRES_EXECUTABLE
+    NAMES windres.exe windres
+    HINTS "${SKYQOE_MINGW_BIN_DIR}"
+    REQUIRED
+  )
+else()
+  enable_language(RC)
+endif()
+
 include(FetchContent)
 
 FetchContent_Declare(
@@ -111,3 +123,73 @@ if(MINGW)
   target_link_options(SkyLevelAssetInspect PRIVATE -municode -static-libgcc -static-libstdc++)
 endif()
 target_link_libraries(SkyLevelAssetInspect PRIVATE shell32)
+
+set(SKYQOE_LOADER_PAYLOAD "${CMAKE_CURRENT_BINARY_DIR}/loader-payload/SkyQoEMenu.dll")
+add_custom_command(
+  OUTPUT "${SKYQOE_LOADER_PAYLOAD}"
+  COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/loader-payload"
+  COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+          "$<TARGET_FILE:SkyQoEMenu>"
+          "${SKYQOE_LOADER_PAYLOAD}"
+  DEPENDS SkyQoEMenu
+  VERBATIM
+)
+add_custom_target(SkyQoELoaderPayload DEPENDS "${SKYQOE_LOADER_PAYLOAD}")
+
+file(TO_CMAKE_PATH "${SKYQOE_LOADER_PAYLOAD}" SKYQOE_LOADER_PAYLOAD_RC_PATH)
+file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tools/loader.manifest"
+     SKYQOE_LOADER_MANIFEST_RC_PATH)
+configure_file(
+  tools/loader.rc.in
+  "${CMAKE_CURRENT_BINARY_DIR}/skyqoe_loader.rc"
+  @ONLY
+)
+
+if(MINGW)
+  set(SKYQOE_LOADER_RESOURCE_OBJECT
+      "${CMAKE_CURRENT_BINARY_DIR}/skyqoe_loader.rc.obj")
+  add_custom_command(
+    OUTPUT "${SKYQOE_LOADER_RESOURCE_OBJECT}"
+    COMMAND "${SKYQOE_WINDRES_EXECUTABLE}" -O coff
+            "${CMAKE_CURRENT_BINARY_DIR}/skyqoe_loader.rc"
+            "${SKYQOE_LOADER_RESOURCE_OBJECT}"
+    DEPENDS
+      "${CMAKE_CURRENT_BINARY_DIR}/skyqoe_loader.rc"
+      "${SKYQOE_LOADER_PAYLOAD}"
+      "${CMAKE_CURRENT_SOURCE_DIR}/tools/loader.manifest"
+    VERBATIM
+  )
+  set_source_files_properties(
+    "${SKYQOE_LOADER_RESOURCE_OBJECT}"
+    PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE
+  )
+  set(SKYQOE_LOADER_RESOURCE_SOURCE "${SKYQOE_LOADER_RESOURCE_OBJECT}")
+else()
+  set_property(
+    SOURCE "${CMAKE_CURRENT_BINARY_DIR}/skyqoe_loader.rc"
+    APPEND PROPERTY OBJECT_DEPENDS "${SKYQOE_LOADER_PAYLOAD}"
+  )
+  set(SKYQOE_LOADER_RESOURCE_SOURCE
+      "${CMAKE_CURRENT_BINARY_DIR}/skyqoe_loader.rc")
+endif()
+
+add_executable(SkyQoELoader WIN32
+  tools/loader.cpp
+  "${SKYQOE_LOADER_RESOURCE_SOURCE}"
+)
+add_dependencies(SkyQoELoader SkyQoELoaderPayload)
+target_include_directories(SkyQoELoader PRIVATE src)
+target_compile_definitions(SkyQoELoader PRIVATE
+  UNICODE
+  _UNICODE
+  WIN32_LEAN_AND_MEAN
+  NOMINMAX
+  SKYQOE_PAYLOAD_VERSION=L"${PROJECT_VERSION}"
+)
+if(MINGW)
+  target_compile_options(SkyQoELoader PRIVATE
+    -Wall -Wextra -Wpedantic -finput-charset=UTF-8 -fexec-charset=UTF-8
+  )
+  target_link_options(SkyQoELoader PRIVATE -municode -static-libgcc -static-libstdc++)
+endif()
+target_link_libraries(SkyQoELoader PRIVATE shell32 ole32 user32)
