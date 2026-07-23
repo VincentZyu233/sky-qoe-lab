@@ -427,20 +427,22 @@ Harness 已验证五个端点可解析，并确认正常关闭后 `27891` 不再
 
 ### Release 资产
 
-GitHub Release [`tools-20260723`](https://github.com/VincentZyu233/sky-qoe-lab/releases/tag/tools-20260723) 标题为“用到的工具”，保存当前源码对应的 Windows x64 可执行产物喵。
+GitHub Actions 在每次 push 到 `main` 或 `master` 时构建 MSVC x64 静态运行库版本，并更新滚动 Release [`tools-latest`](https://github.com/VincentZyu233/sky-qoe-lab/releases/tag/tools-latest) 喵。
+
+工作流源码位于 `.github/workflows/build-release.yml`，也支持在 Actions 页面使用 `workflow_dispatch` 手动触发喵。
 
 | 资产 | 内容 |
 | --- | --- |
 | `SkyQoELoader.exe` | 推荐日常使用的单文件 Win64 一键加载器，内含当前菜单 DLL 喵 |
 | `SkyQoEMenu.dll` | 可直接由 CE Bridge 注入的 v0.3.0 菜单 DLL 喵 |
 | `SkyQoE-native-tools-win-x64.zip` | 单文件加载器、菜单 DLL、Harness、API 测试、完整内存转储工具和 TGCL 关卡检查器喵 |
-| `CeBridge-win-x64.zip` | 自包含 CE Bridge 客户端、CE autorun 脚本、请求脚本和使用说明喵 |
-| `SkyOutfitReader-win-x64.zip` | 自包含的只读外部穿搭读取器原型，版本敏感，日常读取优先使用菜单 API 喵 |
-| `SHA256SUMS.txt` | 上述五个二进制资产的 SHA-256 校验值喵 |
+| `SHA256SUMS.txt` | 上述三个二进制资产的 SHA-256 校验值喵 |
+
+首次完整工具快照仍保留在 [`tools-20260723`](https://github.com/VincentZyu233/sky-qoe-lab/releases/tag/tools-20260723)，其中还包含 CE Bridge 和外部穿搭读取器喵。
 
 Release 不包含 `Sky.exe`、`Sky_dump.bin`、`Sky_full_dump.bin`、完整进程转储、关卡资源、Cheat Engine 安装包或 GCC/SDK 缓存喵。
 
-`SkyQoELoader.exe` 只依赖 Windows 系统 DLL，CE Bridge 与穿搭读取器则使用 .NET 9 `win-x64` 自包含单文件发布，三者都不要求目标机器预装额外运行时喵。
+Actions 版本用 MSVC `/MT` 静态运行库构建，`SkyQoELoader.exe` 不要求目标机器预装 Visual C++ Redistributable 喵。
 
 当前 Release 二进制没有 Authenticode 签名，其他电脑若出现 SmartScreen 未知发布者提示，应先用 `SHA256SUMS.txt` 校验下载文件喵。
 

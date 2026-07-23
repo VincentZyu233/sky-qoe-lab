@@ -1,0 +1,202 @@
+name: Build rolling Windows release
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sky-qoe-tools-release
+  cancel-in-progress: true
+
+env:
+  RELEASE_TAG: tools-latest
+
+jobs:
+  build-release:
+    name: Build and publish Win64 tools
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Configure MSVC x64 release
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake -S SkyQoEMenu -B build -A x64
+          if ($LASTEXITCODE -ne 0) { throw "CMake configure failed with $LASTEXITCODE" }
+
+      - name: Build static runtime binaries
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cmake --build build --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw "CMake build failed with $LASTEXITCODE" }
+
+      - name: Verify embedded loader and menu exports
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:GITHUB_WORKSPACE 'build\Release'
+
+          $loader = Start-Process `
+            -FilePath (Join-Path $bin 'SkyQoELoader.exe') `
+            -ArgumentList '--check', '--quiet' `
+            -WindowStyle Hidden `
+            -Wait `
+            -PassThru
+          if ($loader.ExitCode -ne 0) {
+            throw "SkyQoELoader self-check failed with $($loader.ExitCode)"
+          }
+
+          & (Join-Path $bin 'SkyQoEMenuApiTest.exe') `
+            (Join-Path $bin 'SkyQoEMenu.dll') | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "SkyQoEMenuApiTest failed with $LASTEXITCODE"
+          }
+
+      - name: Package release assets
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $bin = Join-Path $env:GITHUB_WORKSPACE 'build\Release'
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          $package = Join-Path $env:RUNNER_TEMP 'sky-qoe-native-tools'
+          $licenses = Join-Path $package 'licenses'
+
+          New-Item -ItemType Directory -Force -Path $dist, $package, $licenses | Out-Null
+
+          $nativeFiles = @(
+            'SkyQoELoader.exe',
+            'SkyQoEMenu.dll',
+            'SkyQoEMenuHarness.exe',
+            'SkyQoEMenuApiTest.exe',
+            'SkyProcessDump.exe',
+            'SkyLevelAssetInspect.exe'
+          )
+          foreach ($name in $nativeFiles) {
+            Copy-Item -LiteralPath (Join-Path $bin $name) -Destination $package
+          }
+
+          Copy-Item -LiteralPath 'SkyQoEMenu\README.md' -Destination (Join-Path $package 'README.md')
+          Copy-Item -LiteralPath 'build\_deps\imgui-src\LICENSE.txt' `
+            -Destination (Join-Path $licenses 'imgui-LICENSE.txt')
+          Copy-Item -LiteralPath 'build\_deps\minhook-src\LICENSE.txt' `
+            -Destination (Join-Path $licenses 'minhook-LICENSE.txt')
+
+          Copy-Item -LiteralPath (Join-Path $bin 'SkyQoELoader.exe') -Destination $dist
+          Copy-Item -LiteralPath (Join-Path $bin 'SkyQoEMenu.dll') -Destination $dist
+
+          $archive = Join-Path $dist 'SkyQoE-native-tools-win-x64.zip'
+          Compress-Archive -Path (Join-Path $package '*') -DestinationPath $archive `
+            -CompressionLevel Optimal
+
+          $hashNames = @(
+            'SkyQoELoader.exe',
+            'SkyQoEMenu.dll',
+            'SkyQoE-native-tools-win-x64.zip'
+          )
+          $hashLines = foreach ($name in $hashNames) {
+            $hash = (Get-FileHash -Algorithm SHA256 (Join-Path $dist $name)).Hash
+            "$hash  $name"
+          }
+          [System.IO.File]::WriteAllLines(
+            (Join-Path $dist 'SHA256SUMS.txt'),
+            $hashLines,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          Get-ChildItem -LiteralPath $dist | Format-Table Name, Length
+
+      - name: Move rolling tag to this commit
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = $env:RELEASE_TAG
+          $endpoint = "repos/$repo/git/refs/tags/$tag"
+
+          gh api $endpoint --silent 2>$null
+          $tagExists = $LASTEXITCODE -eq 0
+          if ($tagExists) {
+            gh api --method PATCH $endpoint -f sha=$env:GITHUB_SHA -F force=true --silent
+          } else {
+            gh api --method POST "repos/$repo/git/refs" `
+              -f ref="refs/tags/$tag" `
+              -f sha=$env:GITHUB_SHA `
+              --silent
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to update rolling tag" }
+
+      - name: Publish rolling Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $repo = $env:GITHUB_REPOSITORY
+          $tag = $env:RELEASE_TAG
+          $dist = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          $notes = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          $runUrl = "https://github.com/$repo/actions/runs/$env:GITHUB_RUN_ID"
+
+          $body = @"
+          当前 `main` 或 `master` 源码对应的 Windows x64 自动构建产物喵。
+
+          - ``SkyQoELoader.exe``：静态运行库单文件加载器，内嵌同次构建的菜单 DLL 喵。
+          - ``SkyQoEMenu.dll``：可供 CE Bridge 使用的菜单 DLL 喵。
+          - ``SkyQoE-native-tools-win-x64.zip``：加载器、菜单和原生诊断工具包喵。
+          - ``SHA256SUMS.txt``：三个二进制资产的 SHA-256 校验值喵。
+
+          构建提交：``$env:GITHUB_SHA`` 喵。
+
+          构建工作流：[$env:GITHUB_WORKFLOW]($runUrl) 喵。
+
+          当前二进制没有 Authenticode 签名，遇到 SmartScreen 提示时请先核对校验清单喵。
+          "@
+          [System.IO.File]::WriteAllText(
+            $notes,
+            $body,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+          gh release view $tag --repo $repo *> $null
+          $releaseExists = $LASTEXITCODE -eq 0
+          if ($releaseExists) {
+            gh release edit $tag `
+              --repo $repo `
+              --title '用到的工具（自动构建）' `
+              --notes-file $notes `
+              --latest
+          } else {
+            gh release create $tag `
+              --repo $repo `
+              --verify-tag `
+              --title '用到的工具（自动构建）' `
+              --notes-file $notes `
+              --latest
+          }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to create or edit Release" }
+
+          gh release upload $tag `
+            (Join-Path $dist 'SkyQoELoader.exe') `
+            (Join-Path $dist 'SkyQoEMenu.dll') `
+            (Join-Path $dist 'SkyQoE-native-tools-win-x64.zip') `
+            (Join-Path $dist 'SHA256SUMS.txt') `
+            --repo $repo `
+            --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Failed to upload Release assets" }

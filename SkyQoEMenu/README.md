@@ -68,6 +68,8 @@ HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
 
 每次菜单功能更新后重新构建 `SkyQoELoader` 即可得到包含新 DLL 的单文件版本，CMake 依赖会先链接菜单、复制 payload、重编资源，再链接加载器喵。
 
+仓库的 `build-release.yml` 会在 push 到 `main` 或 `master` 后使用 MSVC x64 与静态 `/MT` 运行库完成同样的构建、自检和 `tools-latest` Release 更新喵。
+
 ## 构建
 
 本机工具位于 `.tools/gcc`、`.tools/ninja` 和 `.tools/imgui`，MinHook 1.3.4 由 CMake FetchContent 固定版本获取喵。
