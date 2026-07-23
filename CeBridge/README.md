@@ -43,6 +43,8 @@ CeBridgeClient.exe file .\CeBridge\requests\sky_menu_snapshot.lua
 
 `sky_menu_snapshot.lua` 是默认读取路径，它调用已注入菜单 DLL 的只读导出，不设置断点，并返回完整状态 JSON 喵。
 
+脚本在解析导出前会完整刷新 CE 符号处理器，避免同名 DLL 热卸载重载后误用旧导出地址喵。
+
 `sky_capture_manager.lua` 仅保留为诊断工具，它最多命中 8 次并显式继续和自删；实机曾出现调试异常退出，因此日常流程不要使用它喵。
 
 `sky_read_outfit.lua` 返回一个 JSON 字符串，其中包含 Manager、Avatar、Outfit、数据库地址和全部 10 个槽位的 ID 与资源名喵。

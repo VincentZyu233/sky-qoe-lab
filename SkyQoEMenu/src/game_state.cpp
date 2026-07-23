@@ -41,6 +41,16 @@ float Distance(const std::array<float, 3>& left, const std::array<float, 3>& rig
   return std::sqrt(x * x + y * y + z * z);
 }
 
+bool IsFiniteVector(const std::array<float, 3>& value) {
+  return std::all_of(value.begin(), value.end(), [](float component) {
+    return std::isfinite(component) && std::abs(component) <= 1000000.0F;
+  });
+}
+
+float VectorLength(const std::array<float, 3>& value) {
+  return std::sqrt(value[0] * value[0] + value[1] * value[1] + value[2] * value[2]);
+}
+
 }  // namespace
 
 GameState::GameState() : discovery_buffer_(kDiscoveryChunkSize) {
@@ -80,6 +90,16 @@ bool GameState::ReadBytes(std::uint64_t address, void* output, std::size_t size)
   return ReadProcessMemory(GetCurrentProcess(), reinterpret_cast<const void*>(address), output, size,
                            &bytes_read) != FALSE &&
          bytes_read == size;
+}
+
+bool GameState::WriteBytes(std::uint64_t address, const void* input, std::size_t size) const {
+  if (address < 0x10000 || input == nullptr || size == 0) {
+    return false;
+  }
+  SIZE_T bytes_written = 0;
+  return WriteProcessMemory(GetCurrentProcess(), reinterpret_cast<void*>(address), input, size,
+                            &bytes_written) != FALSE &&
+         bytes_written == size;
 }
 
 BuildInfo GameState::ReadBuildInfo() {
@@ -227,6 +247,38 @@ bool GameState::PopulateAvatar(std::uint64_t avatar, std::int32_t index,
   snapshot.outfit_database = database;
   snapshot.valid = true;
   snapshot.status = index == -2 ? "ready (auto-discovered avatar)" : "ready";
+  return true;
+}
+
+bool GameState::PopulateTransform(std::uint64_t avatar, TransformSnapshot& transform) const {
+  std::uint64_t address = 0;
+  std::array<float, 4> position{};
+  std::array<float, 4> right{};
+  std::array<float, 4> up{};
+  std::array<float, 4> forward{};
+  if (!Read(avatar + 0x18, address) || address == 0 || !Read(address, position) ||
+      !Read(address + 0x50, right) || !Read(address + 0x60, up) ||
+      !Read(address + 0x70, forward)) {
+    return false;
+  }
+
+  TransformSnapshot next;
+  next.address = address;
+  std::copy_n(position.begin(), 3, next.position.begin());
+  std::copy_n(right.begin(), 3, next.right.begin());
+  std::copy_n(up.begin(), 3, next.up.begin());
+  std::copy_n(forward.begin(), 3, next.forward.begin());
+  const float right_length = VectorLength(next.right);
+  const float up_length = VectorLength(next.up);
+  const float forward_length = VectorLength(next.forward);
+  if (!IsFiniteVector(next.position) || !IsFiniteVector(next.right) || !IsFiniteVector(next.up) ||
+      !IsFiniteVector(next.forward) || right_length < 0.5F || right_length > 1.5F ||
+      up_length < 0.5F || up_length > 1.5F || forward_length < 0.5F ||
+      forward_length > 1.5F) {
+    return false;
+  }
+  next.valid = true;
+  transform = next;
   return true;
 }
 
@@ -401,6 +453,7 @@ void GameState::Refresh() {
   }
 
   if (next.valid) {
+    PopulateTransform(next.avatar, next.transform);
     for (std::uint32_t slot = 0; slot < next.slots.size(); ++slot) {
       auto& item = next.slots[slot];
       Read(next.outfit + 0x54 + slot * 4, item.base_id);
@@ -424,6 +477,93 @@ GameSnapshot GameState::Snapshot() const {
 bool GameState::ReadFloat4(std::uint64_t base, std::uint32_t offset,
                            std::array<float, 4>& output) const {
   return base != 0 && ReadBytes(base + offset, output.data(), sizeof(float) * output.size());
+}
+
+bool GameState::TeleportRelative(MoveDirection direction, float distance, std::string& error) {
+  if (!std::isfinite(distance) || distance <= 0.0F || distance > 10000.0F) {
+    error = u8"距离必须在 0 到 10000 之间";
+    return false;
+  }
+
+  const GameSnapshot snapshot = Snapshot();
+  TransformSnapshot transform;
+  if (!snapshot.valid || snapshot.avatar == 0 || !PopulateTransform(snapshot.avatar, transform)) {
+    error = u8"玩家位置尚未就绪";
+    return false;
+  }
+
+  std::array<float, 3> axis{};
+  float sign = 1.0F;
+  switch (direction) {
+    case MoveDirection::Forward:
+      axis = transform.forward;
+      break;
+    case MoveDirection::Backward:
+      axis = transform.forward;
+      sign = -1.0F;
+      break;
+    case MoveDirection::Left:
+      axis = transform.right;
+      sign = -1.0F;
+      break;
+    case MoveDirection::Right:
+      axis = transform.right;
+      break;
+    case MoveDirection::Up:
+      axis = {0.0F, 1.0F, 0.0F};
+      break;
+    case MoveDirection::Down:
+      axis = {0.0F, -1.0F, 0.0F};
+      break;
+  }
+
+  if (direction == MoveDirection::Forward || direction == MoveDirection::Backward ||
+      direction == MoveDirection::Left || direction == MoveDirection::Right) {
+    axis[1] = 0.0F;
+    const float horizontal_length = VectorLength(axis);
+    if (!std::isfinite(horizontal_length) || horizontal_length < 0.001F) {
+      error = u8"角色朝向无效";
+      return false;
+    }
+    for (float& component : axis) {
+      component /= horizontal_length;
+    }
+  }
+
+  std::array<float, 4> primary{};
+  std::array<float, 4> secondary{};
+  if (!Read(transform.address, primary) || !Read(transform.address + 0x10, secondary)) {
+    error = u8"读取位置失败";
+    return false;
+  }
+  const auto original_primary = primary;
+  const auto original_secondary = secondary;
+  for (std::size_t index = 0; index < 3; ++index) {
+    const float delta = axis[index] * distance * sign;
+    primary[index] += delta;
+    secondary[index] += delta;
+  }
+  if (!IsFiniteVector({primary[0], primary[1], primary[2]})) {
+    error = u8"目标坐标无效";
+    return false;
+  }
+
+  if (!WriteBytes(transform.address, primary.data(), sizeof(primary)) ||
+      !WriteBytes(transform.address + 0x10, secondary.data(), sizeof(secondary))) {
+    WriteBytes(transform.address, original_primary.data(), sizeof(original_primary));
+    WriteBytes(transform.address + 0x10, original_secondary.data(), sizeof(original_secondary));
+    error = u8"写入位置失败，已恢复原坐标";
+    return false;
+  }
+
+  {
+    std::scoped_lock lock(snapshot_mutex_);
+    if (snapshot_.transform.address == transform.address) {
+      snapshot_.transform.position = {primary[0], primary[1], primary[2]};
+    }
+  }
+  error.clear();
+  return true;
 }
 
 GameState& GetGameState() {

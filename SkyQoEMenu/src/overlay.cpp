@@ -6,8 +6,10 @@
 #include <dwmapi.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -215,6 +217,86 @@ void DrawFeatureTab(const GameSnapshot& snapshot) {
   GetGameState().SetCoordinateScanEnabled(FeatureEnabled(u8"坐标候选扫描"));
 }
 
+void DrawTeleportControls(const GameSnapshot& snapshot) {
+  static float distance = 1.0F;
+  static std::string feedback;
+  static bool feedback_success = false;
+
+  ImGui::SeparatorText(u8"精准位移");
+  ImGui::SetNextItemWidth(150.0F);
+  ImGui::InputFloat(u8"距离", &distance, 0.1F, 1.0F, "%.3f");
+  if (!std::isfinite(distance)) {
+    distance = 1.0F;
+  }
+  distance = std::clamp(distance, 0.01F, 10000.0F);
+
+  if (snapshot.transform.valid) {
+    ImGui::TextDisabled("X %.3f   Y %.3f   Z %.3f", snapshot.transform.position[0],
+                        snapshot.transform.position[1], snapshot.transform.position[2]);
+  } else {
+    ImGui::TextDisabled(u8"位置尚未就绪");
+  }
+
+  const auto teleport = [&](MoveDirection direction, const char* label) {
+    std::string error;
+    feedback_success = GetGameState().TeleportRelative(direction, distance, error);
+    if (feedback_success) {
+      char buffer[96]{};
+      std::snprintf(buffer, sizeof(buffer), "%s %.3f", label, distance);
+      feedback = buffer;
+    } else {
+      feedback = error;
+    }
+  };
+
+  const ImVec2 button_size{88.0F, 34.0F};
+  if (ImGui::BeginTable("teleport-buttons", 4, ImGuiTableFlags_SizingFixedFit)) {
+    for (int column = 0; column < 4; ++column) {
+      ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 96.0F);
+    }
+    ImGui::BeginDisabled(!snapshot.transform.valid);
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(1);
+    if (ImGui::Button(u8"向前", button_size)) {
+      teleport(MoveDirection::Forward, u8"向前");
+    }
+    ImGui::TableSetColumnIndex(3);
+    if (ImGui::Button(u8"向上", button_size)) {
+      teleport(MoveDirection::Up, u8"向上");
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(0);
+    if (ImGui::Button(u8"向左", button_size)) {
+      teleport(MoveDirection::Left, u8"向左");
+    }
+    ImGui::TableSetColumnIndex(2);
+    if (ImGui::Button(u8"向右", button_size)) {
+      teleport(MoveDirection::Right, u8"向右");
+    }
+    ImGui::TableSetColumnIndex(3);
+    if (ImGui::Button(u8"向下", button_size)) {
+      teleport(MoveDirection::Down, u8"向下");
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableSetColumnIndex(1);
+    if (ImGui::Button(u8"向后", button_size)) {
+      teleport(MoveDirection::Backward, u8"向后");
+    }
+
+    ImGui::EndDisabled();
+    ImGui::EndTable();
+  }
+
+  if (!feedback.empty()) {
+    ImGui::TextColored(feedback_success ? ImVec4(0.25F, 0.80F, 0.58F, 1.0F)
+                                        : ImVec4(0.95F, 0.52F, 0.38F, 1.0F),
+                       "%s", feedback.c_str());
+  }
+}
+
 void DrawPlayerTab(const GameSnapshot& snapshot) {
   static char manager_input[32]{};
   static std::uint32_t raw_offset = 0;
@@ -243,6 +325,8 @@ void DrawPlayerTab(const GameSnapshot& snapshot) {
     DrawStatusValue(u8"穿搭数据库", FormatAddress(snapshot.outfit_database));
     ImGui::EndTable();
   }
+
+  DrawTeleportControls(snapshot);
 
   ImGui::SeparatorText(u8"坐标候选");
   if (snapshot.coordinate_candidates.empty()) {
@@ -368,7 +452,7 @@ void DrawMenu(const GameSnapshot& snapshot) {
                                               : ImVec4(0.95F, 0.62F, 0.22F, 1.0F);
   ImGui::TextColored(ready_color, "%s", snapshot.status.c_str());
   ImGui::SameLine(ImGui::GetWindowWidth() - 140.0F);
-  ImGui::TextDisabled("v0.1.1");
+  ImGui::TextDisabled("v0.2.0");
 
   if (ImGui::BeginTabBar("main-tabs")) {
     if (ImGui::BeginTabItem(u8"功能")) {

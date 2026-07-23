@@ -36,6 +36,24 @@ struct CoordinateCandidate {
   float score = 0.0F;
 };
 
+struct TransformSnapshot {
+  std::uint64_t address = 0;
+  std::array<float, 3> position{};
+  std::array<float, 3> right{};
+  std::array<float, 3> up{};
+  std::array<float, 3> forward{};
+  bool valid = false;
+};
+
+enum class MoveDirection : std::uint32_t {
+  Forward,
+  Backward,
+  Left,
+  Right,
+  Up,
+  Down,
+};
+
 struct GameSnapshot {
   BuildInfo build;
   std::uint64_t manager = 0;
@@ -49,6 +67,7 @@ struct GameSnapshot {
   std::string status;
   std::array<OutfitSlotSnapshot, 10> slots{};
   std::vector<CoordinateCandidate> coordinate_candidates;
+  TransformSnapshot transform;
 };
 
 class GameState {
@@ -61,16 +80,19 @@ class GameState {
   void Refresh();
   GameSnapshot Snapshot() const;
   bool ReadFloat4(std::uint64_t base, std::uint32_t offset, std::array<float, 4>& output) const;
+  bool TeleportRelative(MoveDirection direction, float distance, std::string& error);
 
  private:
   template <typename T>
   bool Read(std::uint64_t address, T& output) const;
 
   bool ReadBytes(std::uint64_t address, void* output, std::size_t size) const;
+  bool WriteBytes(std::uint64_t address, const void* input, std::size_t size) const;
   bool ReadMsvcString(std::uint64_t address, std::string& output) const;
   std::string ResolveResourceName(std::uint64_t database, std::uint32_t slot, std::uint32_t id) const;
   bool AdvanceAvatarDiscovery(std::uint64_t& avatar);
   bool PopulateAvatar(std::uint64_t avatar, std::int32_t index, GameSnapshot& snapshot) const;
+  bool PopulateTransform(std::uint64_t avatar, TransformSnapshot& transform) const;
   void UpdateCoordinateCandidates(std::uint64_t avatar, GameSnapshot& snapshot);
   static BuildInfo ReadBuildInfo();
 

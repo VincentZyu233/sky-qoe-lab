@@ -65,7 +65,7 @@ std::string BuildSnapshotJson() {
   const skyqoe::GameSnapshot snapshot = skyqoe::GetGameState().Snapshot();
   std::string output;
   output.reserve(4096);
-  output += "{\"version\":\"0.1.1\",\"valid\":";
+  output += "{\"version\":\"0.2.0\",\"valid\":";
   output += snapshot.valid ? "true" : "false";
   output += ",\"status\":";
   AppendJsonString(output, snapshot.status);
@@ -86,6 +86,35 @@ std::string BuildSnapshotJson() {
   output += ",\"avatarIndex\":" + std::to_string(snapshot.avatar_index);
   output += ",\"avatarActive\":" + std::to_string(snapshot.avatar_active);
   output += ",\"avatarFlags\":" + std::to_string(snapshot.avatar_flags);
+  output += ",\"transform\":{\"valid\":";
+  output += snapshot.transform.valid ? "true" : "false";
+  output += ",\"address\":";
+  AppendHexAddress(output, snapshot.transform.address);
+  output += ",\"position\":[";
+  AppendFloat(output, snapshot.transform.position[0]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.position[1]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.position[2]);
+  output += "],\"right\":[";
+  AppendFloat(output, snapshot.transform.right[0]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.right[1]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.right[2]);
+  output += "],\"up\":[";
+  AppendFloat(output, snapshot.transform.up[0]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.up[1]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.up[2]);
+  output += "],\"forward\":[";
+  AppendFloat(output, snapshot.transform.forward[0]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.forward[1]);
+  output.push_back(',');
+  AppendFloat(output, snapshot.transform.forward[2]);
+  output += "]}";
   output += ",\"slots\":[";
   for (std::size_t index = 0; index < snapshot.slots.size(); ++index) {
     const auto& slot = snapshot.slots[index];
@@ -157,6 +186,20 @@ extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_GetEffectiveOutf
                                       : 0;
 }
 
+extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_TeleportRelative(
+    std::uint64_t direction, std::uint64_t distance_millimeters) {
+  if (direction > static_cast<std::uint64_t>(skyqoe::MoveDirection::Down) ||
+      distance_millimeters == 0 || distance_millimeters > 10000000) {
+    return 0;
+  }
+  std::string error;
+  const float distance = static_cast<float>(distance_millimeters) / 1000.0F;
+  return skyqoe::GetGameState().TeleportRelative(
+             static_cast<skyqoe::MoveDirection>(direction), distance, error)
+             ? 1
+             : 0;
+}
+
 extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_CopySnapshotJson(
     char* output, std::uint64_t capacity) {
   try {
@@ -190,7 +233,7 @@ extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_RequestShutdown(
 
 extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_GetVersion(
     std::uint64_t) {
-  return 0x00010001;
+  return 0x00020000;
 }
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {

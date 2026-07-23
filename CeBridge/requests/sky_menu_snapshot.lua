@@ -1,4 +1,4 @@
-loadNewSymbols()
+reinitializeSymbolhandler(true)
 
 local copySnapshot = getAddressSafe('SkyQoEMenu.SkyQoE_CopySnapshotJson')
 if not copySnapshot then
