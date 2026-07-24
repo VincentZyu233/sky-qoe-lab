@@ -24,7 +24,7 @@ namespace skyqoe {
 namespace {
 
 constexpr std::uint32_t kAddChatMessageRva = 0x013F88C0;
-constexpr std::uint32_t kOnKeyboardCompleteRva = 0x010E1670;
+constexpr std::uint32_t kSubmitChatMessageRva = 0x013F7C50;
 constexpr std::uint32_t kGameRootVtableRva = 0x01E1F070;
 constexpr std::size_t kMessageCapacity = 256;
 constexpr std::size_t kCaptureTextBytes = 512;
@@ -39,9 +39,9 @@ constexpr std::array<std::uint8_t, 16> kAddChatMessagePrefix = {
     0x55, 0x41, 0x57, 0x41, 0x56, 0x41, 0x55, 0x41,
     0x54, 0x56, 0x57, 0x53, 0x48, 0x81, 0xEC, 0x68,
 };
-constexpr std::array<std::uint8_t, 16> kOnKeyboardCompletePrefix = {
-    0x55, 0x41, 0x56, 0x56, 0x57, 0x53, 0x48, 0x81,
-    0xEC, 0xA0, 0x00, 0x00, 0x00, 0x48, 0x8D, 0xAC,
+constexpr std::array<std::uint8_t, 16> kSubmitChatMessagePrefix = {
+    0x55, 0x48, 0x89, 0xE5, 0x48, 0x8B, 0x49, 0x10,
+    0x5D, 0xE9, 0x02, 0x00, 0x00, 0x00, 0xCC, 0xCC,
 };
 constexpr std::array<const char*, 26> kChannelNames = {
     "public", "private", "local", "bench1", "bench2", "bench3", "bench4",
@@ -62,10 +62,6 @@ struct InternalChatMessage {
   std::uint16_t text_length = 0;
   SourceUuid source;
   std::uint32_t channel = 0;
-  std::uint64_t sender_avatar = 0;
-  std::int32_t sender_avatar_index = -1;
-  bool local = false;
-  bool sender_known = false;
 };
 
 struct PendingChatTask {
@@ -75,12 +71,12 @@ struct PendingChatTask {
 
 using AddChatMessageFn = void (*)(void*, const char*, const SourceUuid*, std::uint32_t,
                                   const void*);
-using OnKeyboardCompleteFn = void (*)(void*, char*, bool, bool);
+using SubmitChatMessageFn = void (*)(void*, const char*, bool, bool);
 
 std::uint8_t* g_module_base = nullptr;
 void* g_add_chat_target = nullptr;
 AddChatMessageFn g_original_add_chat = nullptr;
-OnKeyboardCompleteFn g_on_keyboard_complete = nullptr;
+SubmitChatMessageFn g_submit_chat_message = nullptr;
 std::atomic<bool> g_shutting_down{false};
 std::atomic<bool> g_game_thread_ready{false};
 std::atomic<std::uint32_t> g_hook_inflight{0};
@@ -241,27 +237,13 @@ void CaptureChatMessage(const char* text, const SourceUuid* source, std::uint32_
     ++g_capture_dropped;
     return;
   }
-  const std::string clean = SanitizeUtf8(std::string_view(raw.data(), raw_length));
-  const GameSnapshot snapshot = GetGameState().Snapshot();
-
   InternalChatMessage message;
   message.received_at_ms = UnixMilliseconds();
-  message.text_length = static_cast<std::uint16_t>(
-      std::min<std::size_t>(clean.size(), message.text.size() - 1));
-  std::memcpy(message.text.data(), clean.data(), message.text_length);
+  message.text_length = static_cast<std::uint16_t>(raw_length);
+  std::memcpy(message.text.data(), raw.data(), message.text_length);
   message.text[message.text_length] = '\0';
   message.source = source_copy;
   message.channel = channel;
-  for (const auto& player : snapshot.world.room_players) {
-    if (!player.uuid_valid || player.uuid != source_copy.bytes) {
-      continue;
-    }
-    message.sender_known = true;
-    message.sender_avatar = player.avatar;
-    message.sender_avatar_index = static_cast<std::int32_t>(player.index);
-    message.local = player.local;
-    break;
-  }
 
   std::scoped_lock lock(g_message_mutex);
   message.sequence = g_next_message_sequence++;
@@ -352,12 +334,12 @@ bool InitializeChatBridge() {
     return false;
   }
 
-  std::array<std::uint8_t, kOnKeyboardCompletePrefix.size()> send_prefix{};
-  g_on_keyboard_complete = reinterpret_cast<OnKeyboardCompleteFn>(
-      g_module_base + kOnKeyboardCompleteRva);
+  std::array<std::uint8_t, kSubmitChatMessagePrefix.size()> send_prefix{};
+  g_submit_chat_message = reinterpret_cast<SubmitChatMessageFn>(
+      g_module_base + kSubmitChatMessageRva);
   g_send_supported.store(
-      ReadCurrent(reinterpret_cast<const void*>(g_on_keyboard_complete), send_prefix) &&
-          send_prefix == kOnKeyboardCompletePrefix,
+      ReadCurrent(reinterpret_cast<const void*>(g_submit_chat_message), send_prefix) &&
+          send_prefix == kSubmitChatMessagePrefix,
       std::memory_order_release);
 
   g_add_chat_target = g_module_base + kAddChatMessageRva;
@@ -420,7 +402,7 @@ void ShutdownChatBridge() {
   std::scoped_lock lock(g_task_mutex);
   g_capture_hook_installed.store(false, std::memory_order_release);
   g_original_add_chat = nullptr;
-  g_on_keyboard_complete = nullptr;
+  g_submit_chat_message = nullptr;
   g_add_chat_target = nullptr;
   g_status = "shut down";
 }
@@ -487,7 +469,7 @@ ChatEnqueueResult QueueChatMessage(std::string message) {
 
 void ProcessPendingChatSend() {
   if (g_shutting_down.load(std::memory_order_acquire) ||
-      !g_game_thread_ready.load(std::memory_order_acquire) || !g_on_keyboard_complete) {
+      !g_game_thread_ready.load(std::memory_order_acquire) || !g_submit_chat_message) {
     return;
   }
   const std::uint64_t now_tick = GetTickCount64();
@@ -505,25 +487,33 @@ void ProcessPendingChatSend() {
 
   const GameSnapshot snapshot = GetGameState().Snapshot();
   std::uint64_t vtable = 0;
-  std::array<std::uint8_t, kOnKeyboardCompletePrefix.size()> prefix{};
+  std::uint64_t chat = 0;
+  std::uint64_t chat_context = 0;
+  std::array<std::uint8_t, kSubmitChatMessagePrefix.size()> prefix{};
   const bool valid = snapshot.build.supported && snapshot.world.root >= 0x10000 &&
                      ReadCurrent(reinterpret_cast<const void*>(snapshot.world.root), vtable) &&
                      vtable == snapshot.build.module_base + kGameRootVtableRva &&
-                     ReadCurrent(reinterpret_cast<const void*>(g_on_keyboard_complete), prefix) &&
-                     prefix == kOnKeyboardCompletePrefix;
+                     ReadCurrent(reinterpret_cast<const void*>(snapshot.world.root + 0x718),
+                                 chat) &&
+                     chat >= 0x10000 &&
+                     ReadCurrent(reinterpret_cast<const void*>(chat + 0x10), chat_context) &&
+                     chat_context >= 0x10000 &&
+                     ReadCurrent(reinterpret_cast<const void*>(g_submit_chat_message), prefix) &&
+                     prefix == kSubmitChatMessagePrefix;
   if (!valid) {
     std::scoped_lock lock(g_task_mutex);
     ++g_failed;
-    SetTaskStateLocked(request.id, "failed", "GameRoot or native chat signature validation failed");
+    SetTaskStateLocked(request.id, "failed",
+                       "GameRoot, chat subsystem or native signature validation failed");
     g_status = "chat send failed validation";
     return;
   }
 
-  g_on_keyboard_complete(reinterpret_cast<void*>(snapshot.world.root), request.message.data(),
-                         false, true);
+  g_submit_chat_message(reinterpret_cast<void*>(chat), request.message.c_str(), true, true);
   std::scoped_lock lock(g_task_mutex);
   ++g_submitted;
-  SetTaskStateLocked(request.id, "succeeded", "submitted through Game::OnKeyboardComplete");
+  SetTaskStateLocked(request.id, "succeeded",
+                     "copied and submitted through the native chat subsystem");
   g_status = "chat message submitted on the game thread";
 }
 
@@ -562,6 +552,7 @@ ChatStatusSnapshot GetChatStatusSnapshot() {
 std::vector<ChatMessageSnapshot> GetChatMessages(std::uint64_t after, std::size_t limit) {
   limit = std::clamp<std::size_t>(limit, 1, 100);
   std::vector<ChatMessageSnapshot> result;
+  const GameSnapshot game = GetGameState().Snapshot();
   std::scoped_lock lock(g_message_mutex);
   const std::size_t oldest =
       (g_message_write + g_messages.size() - g_message_count) % g_messages.size();
@@ -573,13 +564,20 @@ std::vector<ChatMessageSnapshot> GetChatMessages(std::uint64_t after, std::size_
     ChatMessageSnapshot next;
     next.sequence = item.sequence;
     next.received_at_ms = item.received_at_ms;
-    next.text.assign(item.text.data(), item.text_length);
+    next.text = SanitizeUtf8(std::string_view(item.text.data(), item.text_length));
     next.source_uuid = UuidHex(item.source);
     next.channel = item.channel;
     next.channel_name = ChannelName(item.channel);
-    next.direction = item.sender_known ? (item.local ? "outgoing" : "incoming") : "unknown";
-    next.sender_avatar = item.sender_avatar;
-    next.sender_avatar_index = item.sender_avatar_index;
+    next.direction = "unknown";
+    for (const auto& player : game.world.room_players) {
+      if (!player.uuid_valid || player.uuid != item.source.bytes) {
+        continue;
+      }
+      next.direction = player.local ? "outgoing" : "incoming";
+      next.sender_avatar = player.avatar;
+      next.sender_avatar_index = static_cast<std::int32_t>(player.index);
+      break;
+    }
     result.push_back(std::move(next));
   }
   if (result.size() > limit) {

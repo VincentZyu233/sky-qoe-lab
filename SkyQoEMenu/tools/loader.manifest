@@ -3,7 +3,7 @@
   <assemblyIdentity
       type="win32"
       name="SkyQoELab.SkyQoELoader"
-      version="0.6.0.0"
+      version="0.6.1.0"
       processorArchitecture="amd64" />
   <description>Sky QoE single-file loader and process monitor</description>
   <dependency>
