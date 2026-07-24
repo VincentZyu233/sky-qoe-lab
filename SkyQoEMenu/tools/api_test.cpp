@@ -39,7 +39,7 @@ int main(int argument_count, char** arguments) {
     std::cerr << "Required export is missing\n";
     return 2;
   }
-  if (get_version(0) != 0x00060100) {
+  if (get_version(0) != 0x00070000) {
     std::cerr << "Unexpected DLL version\n";
     return 3;
   }
@@ -70,7 +70,7 @@ int main(int argument_count, char** arguments) {
 
   const std::string json(buffer.data());
   if (json.empty() || json.front() != '{' || json.back() != '}' ||
-      json.find("\"version\":\"0.6.1\"") == std::string::npos ||
+      json.find("\"version\":\"0.7.0\"") == std::string::npos ||
       json.find("\"transform\":{") == std::string::npos ||
       json.find("\"slots\":[") == std::string::npos ||
       json.find("\"coordinateCandidates\":[") == std::string::npos ||

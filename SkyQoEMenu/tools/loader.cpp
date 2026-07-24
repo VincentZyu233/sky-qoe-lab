@@ -1,4 +1,5 @@
 #include "game_state.h"
+#include "loader_telemetry.h"
 
 #include <windows.h>
 #include <commctrl.h>
@@ -8,6 +9,8 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -15,6 +18,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -34,6 +38,7 @@ constexpr wchar_t kActionMutexName[] = L"Local\\SkyQoELoader.Action.SingleInstan
 constexpr UINT_PTR kProcessRefreshTimer = 1;
 constexpr UINT kProcessRefreshIntervalMs = 1000;
 constexpr UINT kActionCompletedMessage = WM_APP + 1;
+constexpr UINT kTelemetryUpdatedMessage = WM_APP + 2;
 
 enum class LoadMode {
   kInjectOnly,
@@ -134,14 +139,27 @@ struct LoaderWindowState {
   HWND inject_button = nullptr;
   HWND reload_button = nullptr;
   HWND activity = nullptr;
+  HWND api_status = nullptr;
+  HWND telemetry_updated = nullptr;
+  HWND player_status = nullptr;
+  HWND position_status = nullptr;
+  HWND world_status = nullptr;
+  HWND environment_status = nullptr;
+  HWND automation_status = nullptr;
+  HWND outfit_summary = nullptr;
+  HWND room_summary = nullptr;
+  HWND chat_summary = nullptr;
   HFONT normal_font = nullptr;
   HFONT heading_font = nullptr;
   HFONT small_font = nullptr;
   HBRUSH window_brush = nullptr;
   COLORREF status_color = RGB(92, 99, 112);
+  COLORREF api_color = RGB(92, 99, 112);
   UINT dpi = 96;
   bool busy = false;
   bool payload_ready = false;
+  std::atomic<bool> telemetry_stop{false};
+  std::thread telemetry_thread;
   ProcessProbe probe;
 };
 
@@ -1058,13 +1076,25 @@ HWND CreateLoaderControl(LoaderWindowState& state, DWORD extended_style,
   return control;
 }
 
-HWND CreateValueField(LoaderWindowState& state, int y) {
+HWND CreateValueField(LoaderWindowState& state, int x, int y, int width) {
   HWND field = CreateLoaderControl(
       state, WS_EX_CLIENTEDGE, L"EDIT", L"—",
-      ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP, 148, y, 420, 25);
+      ES_READONLY | ES_AUTOHSCROLL | WS_TABSTOP, x, y, width, 25);
   if (field) {
     SendMessageW(field, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
                  MAKELPARAM(7, 7));
+  }
+  return field;
+}
+
+HWND CreateSummaryField(LoaderWindowState& state, int x, int y, int width, int height) {
+  HWND field = CreateLoaderControl(
+      state, WS_EX_CLIENTEDGE, L"EDIT", L"等待状态数据…",
+      ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL,
+      x, y, width, height, 0, state.small_font);
+  if (field) {
+    SendMessageW(field, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                 MAKELPARAM(8, 8));
   }
   return field;
 }
@@ -1074,45 +1104,82 @@ bool CreateLoaderControls(LoaderWindowState& state) {
   state.normal_font = CreateUiFont(state.dpi, 10, FW_NORMAL);
   state.small_font = CreateUiFont(state.dpi, 9, FW_NORMAL);
 
-  CreateLoaderControl(state, 0, L"STATIC", L"Sky QoE Loader",
-                      SS_LEFT, 24, 18, 430, 34, 0, state.heading_font);
+  CreateLoaderControl(state, 0, L"STATIC", L"Sky QoE 状态与模组加载器",
+                      SS_LEFT, 24, 18, 520, 34, 0, state.heading_font);
   const std::wstring subtitle =
       std::wstring(L"单文件静态加载器  ·  内嵌菜单 v") + SKYQOE_PAYLOAD_VERSION;
   CreateLoaderControl(state, 0, L"STATIC", subtitle.c_str(),
                       SS_LEFT, 25, 54, 470, 22, 0, state.small_font);
-  CreateLoaderControl(state, 0, L"STATIC", L"每秒自动检测 Sky 进程与菜单状态",
-                      SS_RIGHT, 365, 55, 210, 20, 0, state.small_font);
+  CreateLoaderControl(state, 0, L"STATIC", L"每秒刷新进程状态与游戏内 HTTP 数据",
+                      SS_RIGHT, 610, 55, 285, 20, 0, state.small_font);
 
-  CreateLoaderControl(state, 0, L"BUTTON", L"游戏状态",
-                      BS_GROUPBOX, 20, 84, 560, 216);
-  CreateLoaderControl(state, 0, L"STATIC", L"进程状态", SS_LEFT, 38, 116, 96, 23);
+  CreateLoaderControl(state, 0, L"BUTTON", L"进程与模组",
+                      BS_GROUPBOX, 20, 82, 430, 210);
+  CreateLoaderControl(state, 0, L"STATIC", L"进程状态", SS_LEFT, 38, 110, 82, 23);
   state.process_status = CreateLoaderControl(state, 0, L"STATIC", L"正在检测…",
-                                             SS_LEFT, 148, 116, 420, 23);
+                                             SS_LEFT, 132, 110, 300, 23);
 
-  CreateLoaderControl(state, 0, L"STATIC", L"进程 PID", SS_LEFT, 38, 148, 96, 25);
-  state.pid_value = CreateValueField(state, 145);
-  CreateLoaderControl(state, 0, L"STATIC", L"模块基址", SS_LEFT, 38, 180, 96, 25);
-  state.module_base_value = CreateValueField(state, 177);
-  CreateLoaderControl(state, 0, L"STATIC", L"入口地址", SS_LEFT, 38, 212, 96, 25);
-  state.entry_point_value = CreateValueField(state, 209);
-  CreateLoaderControl(state, 0, L"STATIC", L"菜单模块", SS_LEFT, 38, 244, 96, 25);
-  state.menu_status_value = CreateValueField(state, 241);
-  CreateLoaderControl(state, 0, L"STATIC", L"构建校验", SS_LEFT, 38, 276, 96, 25);
-  state.build_value = CreateValueField(state, 273);
+  CreateLoaderControl(state, 0, L"STATIC", L"进程 PID", SS_LEFT, 38, 140, 82, 25);
+  state.pid_value = CreateValueField(state, 132, 137, 300);
+  CreateLoaderControl(state, 0, L"STATIC", L"模块基址", SS_LEFT, 38, 170, 82, 25);
+  state.module_base_value = CreateValueField(state, 132, 167, 300);
+  CreateLoaderControl(state, 0, L"STATIC", L"入口地址", SS_LEFT, 38, 200, 82, 25);
+  state.entry_point_value = CreateValueField(state, 132, 197, 300);
+  CreateLoaderControl(state, 0, L"STATIC", L"菜单模块", SS_LEFT, 38, 230, 82, 25);
+  state.menu_status_value = CreateValueField(state, 132, 227, 300);
+  CreateLoaderControl(state, 0, L"STATIC", L"构建校验", SS_LEFT, 38, 260, 82, 25);
+  state.build_value = CreateValueField(state, 132, 257, 300);
+
+  CreateLoaderControl(state, 0, L"BUTTON", L"游戏实时状态 · HTTP API",
+                      BS_GROUPBOX, 470, 82, 430, 210);
+  state.api_status = CreateLoaderControl(state, 0, L"STATIC", L"API 正在连接…",
+                                         SS_LEFT, 488, 110, 238, 22);
+  state.telemetry_updated = CreateLoaderControl(state, 0, L"STATIC", L"—",
+                                                SS_RIGHT, 730, 110, 152, 22, 0,
+                                                state.small_font);
+  state.player_status = CreateLoaderControl(state, 0, L"STATIC", L"人物：等待数据",
+                                            SS_LEFT, 488, 137, 394, 20, 0,
+                                            state.small_font);
+  state.position_status = CreateLoaderControl(state, 0, L"STATIC", L"位置：—",
+                                              SS_LEFT, 488, 162, 394, 20, 0,
+                                              state.small_font);
+  state.world_status = CreateLoaderControl(state, 0, L"STATIC", L"地图：—",
+                                           SS_LEFT, 488, 187, 394, 20, 0,
+                                           state.small_font);
+  state.environment_status = CreateLoaderControl(state, 0, L"STATIC", L"环境数据：—",
+                                                 SS_LEFT, 488, 212, 394, 20, 0,
+                                                 state.small_font);
+  state.automation_status = CreateLoaderControl(state, 0, L"STATIC", L"自动功能：—",
+                                                SS_LEFT, 488, 237, 394, 20, 0,
+                                                state.small_font);
+  CreateLoaderControl(state, 0, L"STATIC",
+                      L"API 仅监听 127.0.0.1:27891，断开时面板会自动等待重连。",
+                      SS_LEFT, 488, 264, 394, 18, 0, state.small_font);
 
   state.inject_button = CreateLoaderControl(
       state, 0, L"BUTTON", L"注入", BS_PUSHBUTTON | WS_TABSTOP,
-      20, 318, 270, 46, kInjectButtonId);
+      20, 306, 430, 42, kInjectButtonId);
   state.reload_button = CreateLoaderControl(
       state, 0, L"BUTTON", L"重载菜单", BS_PUSHBUTTON | WS_TABSTOP,
-      310, 318, 270, 46, kReloadButtonId);
+      470, 306, 430, 42, kReloadButtonId);
+
+  CreateLoaderControl(state, 0, L"BUTTON", L"当前玩家穿搭 · internal_name / ID",
+                      BS_GROUPBOX, 20, 360, 880, 116);
+  state.outfit_summary = CreateSummaryField(state, 34, 384, 852, 78);
+
+  CreateLoaderControl(state, 0, L"BUTTON", L"房间成员与位置",
+                      BS_GROUPBOX, 20, 490, 430, 128);
+  state.room_summary = CreateSummaryField(state, 34, 514, 402, 90);
+  CreateLoaderControl(state, 0, L"BUTTON", L"聊天与接口计数",
+                      BS_GROUPBOX, 470, 490, 430, 128);
+  state.chat_summary = CreateSummaryField(state, 484, 514, 402, 90);
 
   CreateLoaderControl(state, 0, L"BUTTON", L"操作结果",
-                      BS_GROUPBOX, 20, 382, 560, 126);
+                      BS_GROUPBOX, 20, 632, 880, 94);
   state.activity = CreateLoaderControl(
       state, WS_EX_CLIENTEDGE, L"EDIT", L"正在校验内嵌菜单…",
       ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL,
-      34, 407, 532, 84);
+      34, 656, 852, 56, 0, state.small_font);
   if (state.activity) {
     SendMessageW(state.activity, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
                  MAKELPARAM(8, 8));
@@ -1120,11 +1187,76 @@ bool CreateLoaderControls(LoaderWindowState& state) {
   CreateLoaderControl(
       state, 0, L"STATIC",
       L"关闭此窗口不会卸载已经注入的模组菜单；Insert 切换菜单，End 安全卸载。",
-      SS_LEFT, 24, 523, 552, 22, 0, state.small_font);
+      SS_LEFT, 24, 739, 872, 20, 0, state.small_font);
 
   return state.process_status && state.pid_value && state.module_base_value &&
          state.entry_point_value && state.menu_status_value && state.build_value &&
-         state.inject_button && state.reload_button && state.activity;
+         state.inject_button && state.reload_button && state.activity && state.api_status &&
+         state.telemetry_updated && state.player_status && state.position_status &&
+         state.world_status && state.environment_status && state.automation_status &&
+         state.outfit_summary && state.room_summary && state.chat_summary;
+}
+
+void ApplyTelemetry(LoaderWindowState& state, const LoaderTelemetrySnapshot& telemetry) {
+  if (state.busy) {
+    return;
+  }
+  if (!telemetry.connected && !state.probe.running) {
+    SetControlText(state.api_status, L"API 等待 Sky 启动");
+    state.api_color = RGB(112, 117, 128);
+  } else if (!telemetry.connected && !state.probe.menu_loaded) {
+    SetControlText(state.api_status, L"API 等待菜单注入");
+    state.api_color = RGB(181, 103, 32);
+  } else {
+    SetControlText(state.api_status, telemetry.api_status);
+    state.api_color = telemetry.connected ? RGB(28, 126, 91) : RGB(184, 63, 63);
+  }
+  SetControlText(state.telemetry_updated, telemetry.updated_at);
+  SetControlText(state.player_status, telemetry.player);
+  SetControlText(state.position_status, telemetry.position);
+  SetControlText(state.world_status, telemetry.world);
+  SetControlText(state.environment_status, telemetry.environment);
+  SetControlText(state.automation_status, telemetry.automation);
+  SetControlText(state.outfit_summary, telemetry.outfit);
+  SetControlText(state.room_summary, telemetry.room);
+  SetControlText(state.chat_summary, telemetry.chat);
+  InvalidateRect(state.api_status, nullptr, TRUE);
+}
+
+void TelemetryThreadMain(LoaderWindowState* state) {
+  auto next_refresh = std::chrono::steady_clock::now();
+  while (!state->telemetry_stop.load(std::memory_order_acquire)) {
+    try {
+      auto* telemetry = new LoaderTelemetrySnapshot(FetchLoaderTelemetry());
+      if (state->telemetry_stop.load(std::memory_order_acquire) ||
+          !PostMessageW(state->window, kTelemetryUpdatedMessage, 0,
+                        reinterpret_cast<LPARAM>(telemetry))) {
+        delete telemetry;
+      }
+    } catch (...) {
+      // A failed polling cycle must not terminate the persistent loader window.
+    }
+    next_refresh += std::chrono::seconds(1);
+    while (!state->telemetry_stop.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < next_refresh) {
+      Sleep(25);
+    }
+    if (std::chrono::steady_clock::now() > next_refresh + std::chrono::seconds(1)) {
+      next_refresh = std::chrono::steady_clock::now();
+    }
+  }
+}
+
+void StopTelemetryThread(LoaderWindowState& state) {
+  state.telemetry_stop.store(true, std::memory_order_release);
+  if (state.telemetry_thread.joinable()) {
+    state.telemetry_thread.join();
+  }
+  MSG pending{};
+  while (PeekMessageW(&pending, state.window, kTelemetryUpdatedMessage,
+                      kTelemetryUpdatedMessage, PM_REMOVE)) {
+    delete reinterpret_cast<LoaderTelemetrySnapshot*>(pending.lParam);
+  }
 }
 
 void RefreshLoaderWindow(LoaderWindowState& state) {
@@ -1198,6 +1330,8 @@ void StartLoaderAction(LoaderWindowState& state, LoadMode mode) {
                  mode == LoadMode::kInjectOnly
                      ? L"正在校验游戏并注入内嵌菜单，请稍候…"
                      : L"正在安全卸载旧菜单并注入内嵌版本，请稍候…");
+  SetControlText(state.api_status, L"菜单正在变更，等待 API 重新连接…");
+  state.api_color = RGB(181, 103, 32);
 
   auto* request = new ActionRequest{state.window, mode};
   HANDLE thread = CreateThread(nullptr, 0, LoaderActionThread, request, 0, nullptr);
@@ -1260,6 +1394,15 @@ LRESULT CALLBACK LoaderWindowProcedure(HWND window, UINT message, WPARAM w_param
         RefreshLoaderWindow(*state);
       }
       return 0;
+    case kTelemetryUpdatedMessage:
+      if (state) {
+        auto* telemetry = reinterpret_cast<LoaderTelemetrySnapshot*>(l_param);
+        if (telemetry) {
+          ApplyTelemetry(*state, *telemetry);
+          delete telemetry;
+        }
+      }
+      return 0;
     case WM_CTLCOLORSTATIC:
       if (state) {
         const HDC device = reinterpret_cast<HDC>(w_param);
@@ -1268,6 +1411,8 @@ LRESULT CALLBACK LoaderWindowProcedure(HWND window, UINT message, WPARAM w_param
         SetBkColor(device, RGB(247, 248, 250));
         if (control == state->process_status) {
           SetTextColor(device, state->status_color);
+        } else if (control == state->api_status) {
+          SetTextColor(device, state->api_color);
         } else {
           SetTextColor(device, RGB(42, 47, 55));
         }
@@ -1284,6 +1429,9 @@ LRESULT CALLBACK LoaderWindowProcedure(HWND window, UINT message, WPARAM w_param
       return 0;
     case WM_DESTROY:
       KillTimer(window, kProcessRefreshTimer);
+      if (state) {
+        StopTelemetryThread(*state);
+      }
       PostQuitMessage(0);
       return 0;
     case WM_NCDESTROY:
@@ -1334,7 +1482,7 @@ int RunLoaderWindow(HINSTANCE instance, int show_command) {
     return 10;
   }
 
-  RECT window_bounds{0, 0, ScaleForDpi(600, state.dpi), ScaleForDpi(560, state.dpi)};
+  RECT window_bounds{0, 0, ScaleForDpi(920, state.dpi), ScaleForDpi(770, state.dpi)};
   AdjustWindowRectEx(&window_bounds, WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU |
                                          WS_MINIMIZEBOX,
                      FALSE, 0);
@@ -1366,6 +1514,12 @@ int RunLoaderWindow(HINSTANCE instance, int show_command) {
   SetControlText(state.activity, payload_check.message);
   RefreshLoaderWindow(state);
   SetTimer(window, kProcessRefreshTimer, kProcessRefreshIntervalMs, nullptr);
+  try {
+    state.telemetry_thread = std::thread(TelemetryThreadMain, &state);
+  } catch (...) {
+    SetControlText(state.api_status, L"无法启动 HTTP 状态刷新线程");
+    state.api_color = RGB(184, 63, 63);
+  }
   ShowWindow(window, show_command == SW_HIDE ? SW_SHOW : show_command);
   UpdateWindow(window);
 
@@ -1387,6 +1541,7 @@ int RunLoaderWindow(HINSTANCE instance, int show_command) {
     }
   }
 
+  StopTelemetryThread(state);
   if (state.heading_font) {
     DeleteObject(state.heading_font);
   }

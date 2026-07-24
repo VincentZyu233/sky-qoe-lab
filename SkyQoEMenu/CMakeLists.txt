@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SkyQoEMenu VERSION 0.6.1 LANGUAGES CXX)
+project(SkyQoEMenu VERSION 0.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -121,6 +121,22 @@ if(MINGW)
   target_link_options(SkyQoEMenuApiTest PRIVATE -static-libgcc -static-libstdc++)
 endif()
 
+add_executable(SkyQoELoaderTelemetryTest
+  tools/loader_telemetry_test.cpp
+  tools/loader_telemetry.cpp
+)
+target_include_directories(SkyQoELoaderTelemetryTest PRIVATE tools)
+target_compile_definitions(SkyQoELoaderTelemetryTest PRIVATE
+  UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX
+)
+if(MINGW)
+  target_link_options(SkyQoELoaderTelemetryTest PRIVATE -static-libgcc -static-libstdc++)
+endif()
+target_link_libraries(SkyQoELoaderTelemetryTest PRIVATE
+  winhttp
+  nlohmann_json::nlohmann_json
+)
+
 add_executable(SkyProcessDump tools/process_dump.cpp)
 target_compile_definitions(SkyProcessDump PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 if(MINGW)
@@ -196,10 +212,11 @@ endif()
 
 add_executable(SkyQoELoader WIN32
   tools/loader.cpp
+  tools/loader_telemetry.cpp
   "${SKYQOE_LOADER_RESOURCE_SOURCE}"
 )
 add_dependencies(SkyQoELoader SkyQoELoaderPayload)
-target_include_directories(SkyQoELoader PRIVATE src)
+target_include_directories(SkyQoELoader PRIVATE src tools)
 target_compile_definitions(SkyQoELoader PRIVATE
   UNICODE
   _UNICODE
@@ -218,4 +235,12 @@ if(MSVC)
     "/MANIFESTINPUT:${SKYQOE_LOADER_MANIFEST_RC_PATH}"
   )
 endif()
-target_link_libraries(SkyQoELoader PRIVATE comctl32 gdi32 shell32 ole32 user32)
+target_link_libraries(SkyQoELoader PRIVATE
+  comctl32
+  gdi32
+  shell32
+  ole32
+  user32
+  winhttp
+  nlohmann_json::nlohmann_json
+)

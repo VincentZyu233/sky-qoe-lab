@@ -65,6 +65,11 @@ jobs:
             throw "SkyQoEMenuApiTest failed with $LASTEXITCODE"
           }
 
+          & (Join-Path $bin 'SkyQoELoaderTelemetryTest.exe')
+          if ($LASTEXITCODE -ne 0) {
+            throw "SkyQoELoaderTelemetryTest failed with $LASTEXITCODE"
+          }
+
       - name: Package release assets
         shell: pwsh
         run: |
@@ -159,7 +164,7 @@ jobs:
           $body = @"
           当前 `main` 或 `master` 源码对应的 Windows x64 自动构建产物喵。
 
-          - ``SkyQoELoader.exe``：静态运行库单文件常驻加载器，可监控 Sky 进程并执行注入或安全重载，内嵌同次构建的菜单 DLL 喵。
+          - ``SkyQoELoader.exe``：静态运行库单文件常驻加载器，可监控 Sky 进程、每秒展示游戏内状态并执行注入或安全重载，内嵌同次构建的菜单 DLL 喵。
           - ``SkyQoEMenu.dll``：可供 CE Bridge 使用的菜单 DLL 喵。
           - ``SkyQoE-native-tools-win-x64.zip``：加载器、菜单和原生诊断工具包喵。
           - ``SHA256SUMS.txt``：三个二进制资产的 SHA-256 校验值喵。

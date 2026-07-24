@@ -422,7 +422,7 @@ std::string BuildSnapshotJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
   std::string output;
   output.reserve(64 * 1024);
-  output += "{\"version\":\"0.6.1\",\"build\":";
+  output += "{\"version\":\"0.7.0\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"player\":";
   AppendPlayer(output, snapshot);
@@ -461,7 +461,7 @@ std::string BuildSnapshotJson() {
 
 std::string BuildPlayerJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"version\":\"0.6.1\",\"build\":";
+  std::string output = "{\"version\":\"0.7.0\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"player\":";
   AppendPlayer(output, snapshot);
@@ -471,7 +471,7 @@ std::string BuildPlayerJson() {
 
 std::string BuildWorldJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"version\":\"0.6.1\",\"build\":";
+  std::string output = "{\"version\":\"0.7.0\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"world\":";
   AppendWorld(output, snapshot);
@@ -482,7 +482,7 @@ std::string BuildWorldJson() {
 std::string BuildEnvironmentJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
   const WorldSnapshot& world = snapshot.world;
-  std::string output = "{\"version\":\"0.6.1\",\"build\":";
+  std::string output = "{\"version\":\"0.7.0\",\"build\":";
   AppendBuild(output, snapshot.build);
   output += ",\"environment\":{\"root\":";
   AppendAddress(output, world.root);
@@ -521,7 +521,7 @@ std::string BuildEnvironmentJson() {
 std::string BuildEntitiesJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
   const WorldSnapshot& world = snapshot.world;
-  std::string output = "{\"version\":\"0.6.1\",\"entities\":{\"roomPlayers\":";
+  std::string output = "{\"version\":\"0.7.0\",\"entities\":{\"roomPlayers\":";
   AppendRoomPlayers(output, world);
   output += ",\"nearbyRadius\":";
   AppendFloat(output, world.nearby_radius);
@@ -563,7 +563,7 @@ std::string BuildEntitiesJson() {
 
 std::string BuildRoomJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
-  std::string output = "{\"version\":\"0.6.1\",\"room\":";
+  std::string output = "{\"version\":\"0.7.0\",\"room\":";
   AppendRoom(output, snapshot.world, true);
   output.push_back('}');
   return output;
@@ -613,7 +613,7 @@ std::string BuildObjectsJson(std::size_t offset, std::size_t limit,
       items.push_back('}');
     }
   }
-  std::string output = "{\"version\":\"0.6.1\",\"level\":";
+  std::string output = "{\"version\":\"0.7.0\",\"level\":";
   AppendJsonString(output, world.level);
   output += ",\"catalogReady\":";
   output += world.level_assets_valid ? "true" : "false";
@@ -629,7 +629,7 @@ std::string BuildObjectsJson(std::size_t offset, std::size_t limit,
 }
 
 std::string BuildChatStatusJson() {
-  std::string output = "{\"version\":\"0.6.1\",\"chat\":";
+  std::string output = "{\"version\":\"0.7.0\",\"chat\":";
   AppendChatStatus(output, GetChatStatusSnapshot());
   output.push_back('}');
   return output;
@@ -639,7 +639,7 @@ std::string BuildChatMessagesJson(std::uint64_t after, std::size_t limit) {
   limit = std::clamp<std::size_t>(limit, 1, 100);
   const ChatStatusSnapshot status = GetChatStatusSnapshot();
   const auto messages = GetChatMessages(after, limit);
-  std::string output = "{\"version\":\"0.6.1\",\"after\":" + std::to_string(after);
+  std::string output = "{\"version\":\"0.7.0\",\"after\":" + std::to_string(after);
   output += ",\"limit\":" + std::to_string(limit);
   output += ",\"oldestAvailable\":" + std::to_string(status.oldest_sequence);
   output += ",\"newestAvailable\":" + std::to_string(status.newest_sequence);
@@ -678,7 +678,7 @@ std::optional<std::string> BuildChatTaskJson(std::uint64_t id) {
   if (!task) {
     return std::nullopt;
   }
-  std::string output = "{\"version\":\"0.6.1\",\"task\":{\"id\":" +
+  std::string output = "{\"version\":\"0.7.0\",\"task\":{\"id\":" +
                        std::to_string(task->id);
   output += ",\"state\":";
   AppendJsonString(output, task->state);
@@ -699,7 +699,7 @@ std::string BuildOutfitCatalogJson() {
   const auto& catalog = GetOutfitCatalog();
   std::string output;
   output.reserve(384 * 1024);
-  output += "{\"version\":\"0.6.1\",\"state\":";
+  output += "{\"version\":\"0.7.0\",\"state\":";
   AppendOutfitChanger(output, changer);
   output += ",\"slots\":[";
   for (std::size_t slot = 0; slot < catalog.size(); ++slot) {
@@ -735,7 +735,7 @@ std::string BuildHealthJson() {
   const GameSnapshot snapshot = GetGameState().Snapshot();
   const OutfitChangerSnapshot changer = GetOutfitChangerSnapshot();
   const ChatStatusSnapshot chat = GetChatStatusSnapshot();
-  std::string output = "{\"ok\":true,\"version\":\"0.6.1\",\"buildSupported\":";
+  std::string output = "{\"ok\":true,\"version\":\"0.7.0\",\"buildSupported\":";
   output += snapshot.build.supported ? "true" : "false";
   output += ",\"stateValid\":";
   output += snapshot.valid ? "true" : "false";
@@ -750,7 +750,7 @@ std::string BuildHealthJson() {
 }
 
 std::string BuildSchemaJson() {
-  return R"({"version":"0.6.1","readOnly":false,"bind":"127.0.0.1:27891","endpoints":{"GET /health":"service, build and chat readiness","GET /v1/state":"complete local player, world, outfit, effect and chat status snapshot","GET /v1/player":"local player transform and outfit slots","GET /v1/world":"world scan, room, level assets, nearby transforms and automation","GET /v1/environment":"level and scan environment summary","GET /v1/entities":"room avatars, nearby transform candidates and wax targets","GET /v1/room":"room capacity and validated avatar members","GET /v1/objects":"paginated TGCL object catalog; offset, limit and search query parameters","GET /v1/outfits":"all outfit definitions, IDs, seasons and closet flags","GET /v1/chat/status":"chat hook, queue and ring-buffer status","GET /v1/chat/messages":"captured chat; after and limit query parameters","POST /v1/chat/send":"queue one UTF-8 chat message and return 202 with a task ID","GET /v1/tasks/{id}":"queued chat task state","GET /v1/schema":"this endpoint map"},"limits":{"requestHeadersBytes":16384,"requestBodyBytes":4096,"chatMessageUtf8Bytes":256,"chatQueue":8,"chatMessages":256,"chatTasks":128,"objectPage":256},"addressEncoding":"hexadecimal strings","units":{"position":"game world units","distance":"game world units","interval":"milliseconds","timestamps":"Unix milliseconds"}})";
+  return R"({"version":"0.7.0","readOnly":false,"bind":"127.0.0.1:27891","endpoints":{"GET /health":"service, build and chat readiness","GET /v1/state":"complete local player, world, outfit, effect and chat status snapshot","GET /v1/player":"local player transform and outfit slots","GET /v1/world":"world scan, room, level assets, nearby transforms and automation","GET /v1/environment":"level and scan environment summary","GET /v1/entities":"room avatars, nearby transform candidates and wax targets","GET /v1/room":"room capacity and validated avatar members","GET /v1/objects":"paginated TGCL object catalog; offset, limit and search query parameters","GET /v1/outfits":"all outfit definitions, IDs, seasons and closet flags","GET /v1/chat/status":"chat hook, queue and ring-buffer status","GET /v1/chat/messages":"captured chat; after and limit query parameters","POST /v1/chat/send":"queue one UTF-8 chat message and return 202 with a task ID","GET /v1/tasks/{id}":"queued chat task state","GET /v1/schema":"this endpoint map"},"limits":{"requestHeadersBytes":16384,"requestBodyBytes":4096,"chatMessageUtf8Bytes":256,"chatQueue":8,"chatMessages":256,"chatTasks":128,"objectPage":256},"addressEncoding":"hexadecimal strings","units":{"position":"game world units","distance":"game world units","interval":"milliseconds","timestamps":"Unix milliseconds"}})";
 }
 
 }  // namespace skyqoe
