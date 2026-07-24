@@ -17,7 +17,7 @@ BEGIN
     BLOCK "040904b0"
     BEGIN
       VALUE "CompanyName", "Sky QoE Lab\0"
-      VALUE "FileDescription", "Sky QoE single-file loader\0"
+      VALUE "FileDescription", "Sky QoE process monitor and single-file loader\0"
       VALUE "FileVersion", "@PROJECT_VERSION@\0"
       VALUE "InternalName", "SkyQoELoader\0"
       VALUE "OriginalFilename", "SkyQoELoader.exe\0"

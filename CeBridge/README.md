@@ -54,7 +54,7 @@ CeBridgeClient.exe file .\CeBridge\requests\sky_menu_outfit_smoke.lua
 
 `sky_read_outfit.lua` 返回一个 JSON 字符串，其中包含 Manager、Avatar、Outfit、数据库地址和全部 10 个槽位的 ID 与资源名喵。
 
-`sky_menu_reload.lua` 会调用已加载菜单的安全卸载导出，确认模块消失后注入新 DLL，并刷新符号校验 v0.4.1 版本喵。
+`sky_menu_reload.lua` 会调用已加载菜单的安全卸载导出，确认模块消失后注入新 DLL，并刷新符号校验 v0.5.0 版本喵。
 
 `sky_menu_outfit_smoke.lua` 会动态定位当前 Body 索引，切换到下一项、验证生效 ID 后恢复原服装喵。
 

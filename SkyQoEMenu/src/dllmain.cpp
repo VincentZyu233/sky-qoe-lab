@@ -145,7 +145,7 @@ extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_RequestShutdown(
 }
 
 extern "C" __declspec(dllexport) std::uint64_t __stdcall SkyQoE_GetVersion(std::uint64_t) {
-  return 0x00040100;
+  return 0x00050000;
 }
 
 BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID) {

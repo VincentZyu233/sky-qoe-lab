@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SkyQoEMenu VERSION 0.4.1 LANGUAGES CXX)
+project(SkyQoEMenu VERSION 0.5.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -210,11 +210,11 @@ if(MINGW)
   target_compile_options(SkyQoELoader PRIVATE
     -Wall -Wextra -Wpedantic -finput-charset=UTF-8 -fexec-charset=UTF-8
   )
-  target_link_options(SkyQoELoader PRIVATE -municode -static-libgcc -static-libstdc++)
+  target_link_options(SkyQoELoader PRIVATE -municode -static -static-libgcc -static-libstdc++)
 endif()
 if(MSVC)
   target_link_options(SkyQoELoader PRIVATE
     "/MANIFESTINPUT:${SKYQOE_LOADER_MANIFEST_RC_PATH}"
   )
 endif()
-target_link_libraries(SkyQoELoader PRIVATE shell32 ole32 user32)
+target_link_libraries(SkyQoELoader PRIVATE comctl32 gdi32 shell32 ole32 user32)

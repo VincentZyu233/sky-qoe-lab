@@ -1,6 +1,6 @@
 # Sky QoE Menu
 
-`SkyQoEMenu.dll` v0.4.1 是注入 Sky 进程的本地 ImGui QoE 与调试菜单喵。
+`SkyQoEMenu.dll` v0.5.0 是注入 Sky 进程的本地 ImGui QoE 与调试菜单喵。
 
 菜单使用独立透明 D3D11 窗口覆盖 Sky 的 Vulkan 窗口，不 Hook Vulkan swapchain，也不主动发送服务器请求喵。
 
@@ -45,9 +45,15 @@ HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
 
 ## 单文件加载器
 
-`SkyQoELoader.exe` 是原生 Win64 一键加载器，同一次构建产生的 `SkyQoEMenu.dll` 会以 `RCDATA` 资源编入 EXE 喵。
+`SkyQoELoader.exe` 是原生 Win64 常驻加载器，同一次构建产生的 `SkyQoEMenu.dll` 会以 `RCDATA` 资源编入 EXE 喵。
 
 在其他电脑上只需复制并双击 `SkyQoELoader.exe`，不需要携带独立 DLL、Cheat Engine、.NET 运行时或编译工具链喵。
+
+无参数启动会打开常驻窗口，每秒刷新 Sky 是否运行、PID、模块基址、PE 入口地址、构建兼容性和菜单模块状态喵。
+
+“注入”只在菜单尚未加载时启用；“重载菜单”会先调用安全卸载导出，等待旧模块消失后再注入内嵌版本喵。
+
+按钮操作在后台线程执行，完成后加载器窗口继续存在；关闭加载器窗口不会停止或卸载已经注入的模组菜单喵。
 
 加载器只查找 `Sky.exe`，并在注入前校验目标为 AMD64、PE timestamp 为 `0x6A582C8E`、`SizeOfImage` 为 `0x2FB2000` 喵。
 
@@ -56,13 +62,21 @@ HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
 如果同名菜单已经加载，加载器会从远程 PE 导出表定位 `SkyQoE_RequestShutdown`，等待旧模块完整卸载后再注入内嵌版本，不会重复映射两个菜单喵。
 
 ```powershell
-# 双击时执行的默认行为：注入或安全重载并显示结果
+# 打开常驻图形界面
 .\SkyQoELoader.exe
 
 # 只验证 EXE 内嵌 payload，不访问游戏进程
 .\SkyQoELoader.exe --check --quiet
 
-# 注入或重载，但不显示结果对话框
+# 输出进程、入口地址和菜单状态
+.\SkyQoELoader.exe --status --quiet
+
+# 命令行首次注入或安全重载
+.\SkyQoELoader.exe --inject --quiet
+.\SkyQoELoader.exe --reload --quiet
+
+# 兼容旧版自动选择注入或重载的行为
+.\SkyQoELoader.exe --auto --quiet
 .\SkyQoELoader.exe --quiet
 ```
 
@@ -79,14 +93,14 @@ HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
 本机工具位于 `.tools/gcc`、`.tools/ninja` 和 `.tools/imgui`，MinHook 1.3.4 与 nlohmann/json 3.11.3 由 CMake FetchContent 固定版本获取喵。
 
 ```powershell
-cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu-v041 -G Ninja `
+cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu-v050 -G Ninja `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_C_COMPILER=.\.tools\gcc\bin\gcc.exe `
   -DCMAKE_CXX_COMPILER=.\.tools\gcc\bin\g++.exe `
   -DCMAKE_MAKE_PROGRAM=.\.tools\ninja\ninja.exe `
   -DSKYQOE_IMGUI_DIR=.\.tools\imgui
 
-cmake --build .\.build\SkyQoEMenu-v041 --parallel
+cmake --build .\.build\SkyQoEMenu-v050 --parallel
 ```
 
 已经注入的 DLL 会被 Sky 锁定，不能原地覆盖；继续开发时应改用新的 build 目录喵。
@@ -96,13 +110,13 @@ cmake --build .\.build\SkyQoEMenu-v041 --parallel
 ## 验证
 
 ```powershell
-.\.build\SkyQoEMenu-v041\SkyQoEMenuApiTest.exe `
-  .\.build\SkyQoEMenu-v041\SkyQoEMenu.dll
+.\.build\SkyQoEMenu-v050\SkyQoEMenuApiTest.exe `
+  .\.build\SkyQoEMenu-v050\SkyQoEMenu.dll
 
-.\.build\SkyQoEMenu-v041\SkyLevelAssetInspect.exe RainForest `
+.\.build\SkyQoEMenu-v050\SkyLevelAssetInspect.exe RainForest `
   'G:\GGames\Steam\steamapps\common\Sky Children of the Light\data\assets\rain\Data\Levels\RainForest\Objects.level.bin'
 
-.\.build\SkyQoEMenu-v041\SkyQoELoader.exe --check --quiet
+.\.build\SkyQoEMenu-v050\SkyQoELoader.exe --check --quiet
 ```
 
 Harness 用于验证菜单布局、HTTP 端点和正常关闭后的端口释放喵。

@@ -806,7 +806,7 @@ void DrawMenu(const GameSnapshot& snapshot) {
                                               : ImVec4(0.95F, 0.62F, 0.22F, 1.0F);
   ImGui::TextColored(ready_color, "%s", snapshot.status.c_str());
   ImGui::SameLine(ImGui::GetWindowWidth() - 140.0F);
-  ImGui::TextDisabled("v0.4.1");
+  ImGui::TextDisabled("v0.5.0");
 
   if (ImGui::BeginTabBar("main-tabs")) {
     if (ImGui::BeginTabItem(u8"功能")) {

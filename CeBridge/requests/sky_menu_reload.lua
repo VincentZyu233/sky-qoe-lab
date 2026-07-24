@@ -1,4 +1,4 @@
-local dllPath = [[D:\Downloads\temp\.build\SkyQoEMenu-v041\SkyQoEMenu.dll]]
+local dllPath = [[D:\Downloads\temp\.build\SkyQoEMenu-v050\SkyQoEMenu.dll]]
 
 local function findMenuModule()
   for _, module in ipairs(enumModules()) do
@@ -53,10 +53,10 @@ if not getVersion then
   return '{"ok":false,"error":"new menu version export is unavailable"}'
 end
 local version = executeCodeEx(0, 5000, getVersion, 0)
-if version ~= 0x00040100 then
+if version ~= 0x00050000 then
   return string.format('{"ok":false,"error":"unexpected menu version","version":%d}',
                        version or 0)
 end
 
-return string.format('{"ok":true,"pid":%d,"module":"0x%X","size":%d,"version":"0.4.1"}',
+return string.format('{"ok":true,"pid":%d,"module":"0x%X","size":%d,"version":"0.5.0"}',
                      processId, loaded.Address or 0, loaded.Size or 0)
