@@ -18,6 +18,17 @@ struct LevelWaxTarget {
   bool usable = false;
 };
 
+struct LevelObjectSnapshot {
+  std::uint32_t index = 0;
+  std::uint32_t type_index = 0;
+  std::uint32_t type_id = 0;
+  std::string name;
+  bool has_transform = false;
+  std::array<float, 3> transform{};
+  bool has_anchor_position = false;
+  std::array<float, 3> anchor_position{};
+};
+
 struct LevelAssetSnapshot {
   bool valid = false;
   std::string status;
@@ -30,6 +41,7 @@ struct LevelAssetSnapshot {
   std::uint32_t source_count = 0;
   std::uint32_t room_max_players = 0;
   std::vector<std::uint32_t> room_max_candidates;
+  std::vector<LevelObjectSnapshot> objects;
   std::uint32_t wax_spawner_count = 0;
   std::vector<LevelWaxTarget> wax_targets;
 };

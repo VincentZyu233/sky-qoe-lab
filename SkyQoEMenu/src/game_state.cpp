@@ -111,6 +111,7 @@ GameState::GameState()
   world_cache_.nearby_radius = kNearbyRadius;
   world_cache_.scan_status = "waiting for player";
   world_cache_.wax_loop_status = "disabled";
+  world_cache_.level_objects = std::make_shared<const std::vector<LevelObjectSnapshot>>();
 }
 
 void GameState::SetManager(std::uint64_t manager) {
@@ -439,9 +440,11 @@ bool GameState::ValidateManager(std::uint64_t manager, std::uint64_t avatar,
   return false;
 }
 
-void GameState::PopulateRoom(std::uint64_t manager, WorldSnapshot& world) const {
+void GameState::PopulateRoom(std::uint64_t manager, const GameSnapshot& local,
+                             WorldSnapshot& world) {
   world.avatar_capacity = 60;
   world.room_current_players = 0;
+  world.room_players.clear();
   if (manager < 0x10000) {
     return;
   }
@@ -450,12 +453,46 @@ void GameState::PopulateRoom(std::uint64_t manager, WorldSnapshot& world) const 
     std::uint8_t active = 0;
     std::uint64_t outfit = 0;
     std::uint64_t reverse_avatar = 0;
+    std::uint64_t database = 0;
     if (Read(avatar + kAvatarActiveOffset, active) && active == 1 &&
         Read(avatar + kAvatarOutfitOffset, outfit) && outfit >= 0x10000 &&
-        Read(outfit + 8, reverse_avatar) && reverse_avatar == avatar) {
-      ++world.room_current_players;
+        Read(outfit + 8, reverse_avatar) && reverse_avatar == avatar &&
+        Read(outfit + 0x10, database) && database >= 0x10000) {
+      RoomPlayerSnapshot player;
+      player.index = index;
+      player.avatar = avatar;
+      player.outfit = outfit;
+      player.outfit_database = database;
+      player.active = active;
+      player.local = avatar == local.avatar;
+      Read(avatar + kAvatarFlagsOffset, player.flags);
+      const bool uuid_read =
+          ReadBytes(avatar + 0x1097C, player.uuid.data(), player.uuid.size());
+      const bool uuid_has_data = std::any_of(player.uuid.begin(), player.uuid.end(),
+                                             [](std::uint8_t value) { return value != 0; });
+      const bool uuid_is_sentinel = std::all_of(player.uuid.begin(), player.uuid.end(),
+                                                [](std::uint8_t value) {
+                                                  return value == 0xFFU;
+                                                });
+      player.uuid_valid = uuid_read && uuid_has_data && !uuid_is_sentinel;
+      PopulateTransform(avatar, player.transform);
+      if (player.transform.valid && local.transform.valid) {
+        player.distance = Distance(player.transform.position, local.transform.position);
+      }
+      for (std::uint32_t slot = 0; slot < player.slots.size(); ++slot) {
+        auto& item = player.slots[slot];
+        item.index = slot;
+        item.type = kSlotNames[slot];
+        Read(outfit + 0x54 + slot * 4, item.base_id);
+        Read(outfit + 0x1D48 + slot * 4, item.override_id);
+        Read(outfit + 0x1D7C + slot * 4, item.override_flag);
+        item.effective_id = item.override_flag != 0 ? item.override_id : item.base_id;
+        item.resource_name = ResolveResourceName(database, slot, item.effective_id);
+      }
+      world.room_players.push_back(std::move(player));
     }
   }
+  world.room_current_players = static_cast<std::uint32_t>(world.room_players.size());
 }
 
 void GameState::UpdateLevelAssets(const std::string& level, const std::string& source) {
@@ -465,19 +502,23 @@ void GameState::UpdateLevelAssets(const std::string& level, const std::string& s
   if (world_cache_.level == level && world_cache_.level_assets_valid) {
     return;
   }
-  const LevelAssetSnapshot assets = LoadLevelAssets(level);
+  LevelAssetSnapshot assets = LoadLevelAssets(level);
   world_cache_.level = level;
   world_cache_.level_source = source;
   world_cache_.level_assets_valid = assets.valid;
   world_cache_.level_asset_status = assets.status;
   world_cache_.level_asset_path = assets.path;
+  world_cache_.level_type_count = assets.type_count;
+  world_cache_.level_symbol_count = assets.symbol_count;
   world_cache_.level_object_count = assets.object_count;
   world_cache_.level_property_count = assets.property_count;
   world_cache_.level_source_count = assets.source_count;
   world_cache_.room_max_players = assets.room_max_players;
   world_cache_.room_max_candidates = assets.room_max_candidates;
   world_cache_.wax_spawner_count = assets.wax_spawner_count;
-  world_cache_.wax_targets = assets.wax_targets;
+  world_cache_.wax_targets = std::move(assets.wax_targets);
+  world_cache_.level_objects =
+      std::make_shared<const std::vector<LevelObjectSnapshot>>(std::move(assets.objects));
 
   std::scoped_lock lock(automation_mutex_);
   wax_automation_level_.clear();
@@ -795,7 +836,11 @@ void GameState::Refresh() {
   }
 
   next.manager = Manager();
-  PopulateRoom(next.manager, world_cache_);
+  const auto room_now = std::chrono::steady_clock::now();
+  if (next.manager < 0x10000 || room_now >= room_next_refresh_at_) {
+    PopulateRoom(next.manager, next, world_cache_);
+    room_next_refresh_at_ = room_now + std::chrono::milliseconds(500);
+  }
   PopulateAutomation(world_cache_);
   next.world = world_cache_;
   next.local_effects = GetLocalEffectSnapshot();

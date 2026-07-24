@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(SkyQoEMenu VERSION 0.5.0 LANGUAGES CXX)
+project(SkyQoEMenu VERSION 0.6.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -53,6 +53,7 @@ if(NOT EXISTS "${SKYQOE_IMGUI_DIR}/imgui.cpp")
 endif()
 
 add_library(SkyQoEMenu SHARED
+  src/chat_bridge.cpp
   src/dllmain.cpp
   src/game_state.cpp
   src/http_server.cpp

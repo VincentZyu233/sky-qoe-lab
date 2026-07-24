@@ -1,8 +1,8 @@
 # Sky QoE Menu
 
-`SkyQoEMenu.dll` v0.5.0 是注入 Sky 进程的本地 ImGui QoE 与调试菜单喵。
+`SkyQoEMenu.dll` v0.6.0 是注入 Sky 进程的本地 ImGui QoE 与调试菜单喵。
 
-菜单使用独立透明 D3D11 窗口覆盖 Sky 的 Vulkan 窗口，不 Hook Vulkan swapchain，也不主动发送服务器请求喵。
+菜单使用独立透明 D3D11 窗口覆盖 Sky 的 Vulkan 窗口，不 Hook Vulkan swapchain；只有外部程序明确调用聊天发送端点时才进入受限发送队列喵。
 
 ## 功能
 
@@ -17,6 +17,7 @@
 - “循环传到烛火”按最近未访问 Wax 生成器坐标循环传送喵。
 - “循环生成全特效”在 EmitterBarn 游戏线程逐个生成 104 个已验证本地定义喵。
 - 左上常驻 HUD 汇总玩家、坐标、房间、关卡、实体和自动功能状态喵。
+- 本机 HTTP API 可读取玩家、房间成员、环境、TGCL 对象、服饰、实体与聊天，并异步排队聊天发送喵。
 - Sky 失去前台焦点时 Overlay 仍保持显示，仅在游戏最小化或窗口不可见时隐藏喵。
 - `Insert` 显示或隐藏菜单，`End` 安全停止 HTTP、移除 Hook 并卸载 DLL 喵。
 
@@ -26,22 +27,38 @@
 
 ## 外部接口
 
-注入成功后只读 HTTP 服务监听 `127.0.0.1:27891` 喵。
+注入成功后异步 HTTP 服务监听 `127.0.0.1:27891`，只绑定 IPv4 loopback 喵。
 
 ```text
 GET /health
 GET /v1/state
 GET /v1/player
 GET /v1/world
+GET /v1/environment
+GET /v1/entities
+GET /v1/room
+GET /v1/objects?offset=0&limit=100&search=BstNode
 GET /v1/outfits
+GET /v1/chat/status
+GET /v1/chat/messages?after=0&limit=50
+POST /v1/chat/send
+GET /v1/tasks/{id}
 GET /v1/schema
 ```
+
+聊天发送 Body 必须是 `{"message":"text"}`；成功排队返回 `202` 和任务 ID，随后用 `/v1/tasks/{id}` 查询状态喵。
+
+HTTP 使用 4 个固定工作线程、16 个连接等待队列、1500 ms 超时、16 KiB Header 与 4 KiB Body 上限；错误请求返回结构化 JSON，不直接进入游戏线程喵。
+
+聊天消息环固定为 256 项，发送队列固定为 8 项，两次发送至少间隔 1200 ms 且 10 秒最多 5 项喵。
+
+任务 `succeeded` 只表示游戏线程中的原生提交函数已经返回，不是服务器送达回执喵。
 
 `SkyQoE_CopySnapshotJson` 导出与 `/v1/state` 使用同一套 JSON 序列化代码喵。
 
 现有导出还包括 Manager/Avatar/Outfit 读取、服饰目录计数与换装队列、相对传送、菜单切换、安全卸载和两个自动功能的开关/间隔控制喵。
 
-HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
+HTTP 除受限聊天发送外均为只读；传送、换装和两个自动功能仍只通过菜单或控制导出操作喵。
 
 ## 单文件加载器
 
@@ -93,14 +110,14 @@ HTTP 只读，控制导出主要供 CE Bridge 自动化测试使用喵。
 本机工具位于 `.tools/gcc`、`.tools/ninja` 和 `.tools/imgui`，MinHook 1.3.4 与 nlohmann/json 3.11.3 由 CMake FetchContent 固定版本获取喵。
 
 ```powershell
-cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu-v050 -G Ninja `
+cmake -S .\SkyQoEMenu -B .\.build\SkyQoEMenu-v060 -G Ninja `
   -DCMAKE_BUILD_TYPE=Release `
   -DCMAKE_C_COMPILER=.\.tools\gcc\bin\gcc.exe `
   -DCMAKE_CXX_COMPILER=.\.tools\gcc\bin\g++.exe `
   -DCMAKE_MAKE_PROGRAM=.\.tools\ninja\ninja.exe `
   -DSKYQOE_IMGUI_DIR=.\.tools\imgui
 
-cmake --build .\.build\SkyQoEMenu-v050 --parallel
+cmake --build .\.build\SkyQoEMenu-v060 --parallel
 ```
 
 已经注入的 DLL 会被 Sky 锁定，不能原地覆盖；继续开发时应改用新的 build 目录喵。
@@ -110,13 +127,13 @@ cmake --build .\.build\SkyQoEMenu-v050 --parallel
 ## 验证
 
 ```powershell
-.\.build\SkyQoEMenu-v050\SkyQoEMenuApiTest.exe `
-  .\.build\SkyQoEMenu-v050\SkyQoEMenu.dll
+.\.build\SkyQoEMenu-v060\SkyQoEMenuApiTest.exe `
+  .\.build\SkyQoEMenu-v060\SkyQoEMenu.dll
 
-.\.build\SkyQoEMenu-v050\SkyLevelAssetInspect.exe RainForest `
+.\.build\SkyQoEMenu-v060\SkyLevelAssetInspect.exe RainForest `
   'G:\GGames\Steam\steamapps\common\Sky Children of the Light\data\assets\rain\Data\Levels\RainForest\Objects.level.bin'
 
-.\.build\SkyQoEMenu-v050\SkyQoELoader.exe --check --quiet
+.\.build\SkyQoEMenu-v060\SkyQoELoader.exe --check --quiet
 ```
 
 Harness 用于验证菜单布局、HTTP 端点和正常关闭后的端口释放喵。

@@ -4,6 +4,7 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
@@ -55,6 +56,21 @@ struct NearbyTransformSnapshot {
   float distance = 0.0F;
 };
 
+struct RoomPlayerSnapshot {
+  std::uint32_t index = 0;
+  std::uint64_t avatar = 0;
+  std::uint64_t outfit = 0;
+  std::uint64_t outfit_database = 0;
+  std::uint16_t flags = 0;
+  std::uint8_t active = 0;
+  bool local = false;
+  bool uuid_valid = false;
+  std::array<std::uint8_t, 16> uuid{};
+  float distance = 0.0F;
+  TransformSnapshot transform;
+  std::array<OutfitSlotSnapshot, 10> slots{};
+};
+
 struct WorldSnapshot {
   std::uint64_t root = 0;
   std::string manager_source;
@@ -74,15 +90,19 @@ struct WorldSnapshot {
   std::uint32_t room_max_players = 0;
   std::uint32_t avatar_capacity = 60;
   std::vector<std::uint32_t> room_max_candidates;
+  std::vector<RoomPlayerSnapshot> room_players;
 
   bool level_assets_valid = false;
   std::string level_asset_status;
   std::string level_asset_path;
+  std::uint32_t level_type_count = 0;
+  std::uint32_t level_symbol_count = 0;
   std::uint32_t level_object_count = 0;
   std::uint32_t level_property_count = 0;
   std::uint32_t level_source_count = 0;
   std::uint32_t wax_spawner_count = 0;
   std::vector<LevelWaxTarget> wax_targets;
+  std::shared_ptr<const std::vector<LevelObjectSnapshot>> level_objects;
 
   bool wax_loop_enabled = false;
   std::uint32_t wax_loop_interval_ms = 900;
@@ -149,7 +169,7 @@ class GameState {
   void AdvanceWorldScan(const GameSnapshot& player);
   bool PopulateAvatar(std::uint64_t avatar, std::int32_t index, GameSnapshot& snapshot) const;
   bool PopulateTransform(std::uint64_t avatar, TransformSnapshot& transform) const;
-  void PopulateRoom(std::uint64_t manager, WorldSnapshot& world) const;
+  void PopulateRoom(std::uint64_t manager, const GameSnapshot& local, WorldSnapshot& world);
   bool ValidateManager(std::uint64_t manager, std::uint64_t avatar,
                        std::int32_t* index = nullptr) const;
   void UpdateLevelAssets(const std::string& level, const std::string& source);
@@ -182,6 +202,7 @@ class GameState {
   std::uint64_t world_cycle_nearby_count_ = 0;
   std::vector<NearbyTransformSnapshot> world_cycle_nearby_;
   std::unordered_map<std::string, std::uint32_t> world_level_candidates_;
+  std::chrono::steady_clock::time_point room_next_refresh_at_{};
 
   std::atomic<bool> wax_loop_enabled_{false};
   std::atomic<std::uint32_t> wax_loop_interval_ms_{900};

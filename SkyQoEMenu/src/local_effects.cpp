@@ -1,5 +1,6 @@
 #include "local_effects.h"
 
+#include "chat_bridge.h"
 #include "game_state.h"
 #include "outfit_changer.h"
 
@@ -66,6 +67,7 @@ std::uint8_t* g_module_base = nullptr;
 EmitterUpdateFn g_original_update = nullptr;
 CreateEmitterFn g_create_emitter = nullptr;
 void* g_update_target = nullptr;
+std::atomic<std::uint32_t> g_update_hook_inflight{0};
 bool g_minhook_initialized = false;
 bool g_hook_created = false;
 std::uint64_t g_next_emit_ms = 0;
@@ -205,10 +207,13 @@ void ProcessEffect(void* emitter_barn) {
 void HookedEmitterUpdate(void* emitter_barn, void* argument2, void* argument3, void* argument4,
                          std::uint64_t argument5, std::uint64_t argument6,
                          std::uint64_t argument7, std::uint64_t argument8) {
+  g_update_hook_inflight.fetch_add(1, std::memory_order_acq_rel);
   g_original_update(emitter_barn, argument2, argument3, argument4, argument5, argument6,
                     argument7, argument8);
   ProcessPendingOutfitChange();
+  ProcessPendingChatSend();
   ProcessEffect(emitter_barn);
+  g_update_hook_inflight.fetch_sub(1, std::memory_order_acq_rel);
 }
 
 }  // namespace
@@ -220,6 +225,7 @@ bool InitializeLocalEffects() {
   }
   g_state.catalog_count = static_cast<std::uint32_t>(kEmitterDefinitionSlots.size());
   g_state.pool_capacity = kPoolCapacity;
+  g_shutting_down.store(false, std::memory_order_release);
   g_module_base = reinterpret_cast<std::uint8_t*>(GetModuleHandleW(nullptr));
   g_state.supported = SupportedBuild(g_module_base);
   if (!g_state.supported) {
@@ -267,6 +273,8 @@ bool InitializeLocalEffects() {
   g_state.loaded_count = CountLoadedDefinitions();
   g_state.hook_installed = true;
   SetOutfitGameThreadReady(true);
+  InitializeChatBridge();
+  SetChatGameThreadReady(true);
   char status_text[128]{};
   std::snprintf(status_text, sizeof(status_text), "ready; %u/%zu local definitions loaded",
                 g_state.loaded_count, kEmitterDefinitionSlots.size());
@@ -278,8 +286,15 @@ void ShutdownLocalEffects() {
   g_shutting_down.store(true, std::memory_order_release);
   g_enabled.store(false, std::memory_order_release);
   SetOutfitGameThreadReady(false);
+  SetChatGameThreadReady(false);
   if (g_hook_created && g_update_target) {
     MH_DisableHook(g_update_target);
+  }
+  while (g_update_hook_inflight.load(std::memory_order_acquire) != 0) {
+    Sleep(1);
+  }
+  ShutdownChatBridge();
+  if (g_hook_created && g_update_target) {
     MH_RemoveHook(g_update_target);
   }
   if (g_minhook_initialized) {

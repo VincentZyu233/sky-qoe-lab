@@ -289,6 +289,7 @@ LevelAssetSnapshot ParseLevelAssetFile(const std::string& level, const std::wstr
 
   std::size_t offset = object_data_offset;
   std::optional<std::array<float, 3>> last_transform;
+  result.objects.reserve(result.object_count);
   for (std::uint32_t object_index = 0; object_index < result.object_count; ++object_index) {
     std::uint32_t type_index = 0;
     if (!ReadU32(bytes, offset, type_index) || type_index >= types.size()) {
@@ -309,6 +310,20 @@ LevelAssetSnapshot ParseLevelAssetFile(const std::string& level, const std::wstr
     if (parsed.transform) {
       last_transform = parsed.transform;
     }
+    LevelObjectSnapshot object;
+    object.index = object_index;
+    object.type_index = type_index;
+    object.type_id = types[type_index].type_id;
+    object.name = object_name;
+    object.has_transform = parsed.transform.has_value();
+    if (parsed.transform) {
+      object.transform = *parsed.transform;
+    }
+    object.has_anchor_position = last_transform.has_value();
+    if (last_transform) {
+      object.anchor_position = *last_transform;
+    }
+    result.objects.push_back(std::move(object));
     if (type_index == 41 && last_transform) {
       LevelWaxTarget target;
       target.object_index = object_index;
